@@ -1,4 +1,3 @@
-# Tablebot-pipe-Advanced
 
 # TableBot-Pipe Advanced 🚀
 

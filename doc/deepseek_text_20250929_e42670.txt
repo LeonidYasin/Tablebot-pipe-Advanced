@@ -1,0 +1,8 @@
+core/message_sender/
+├── __init__.py
+├── base.py           # Базовые функции
+├── text_sender.py    # Текстовые сообщения
+├── media_sender.py   # Медиа файлы
+├── poll_sender.py    # Опросы
+├── markup_builder.py # Создание клавиатур
+└── format_detector.py # Определение форматирования

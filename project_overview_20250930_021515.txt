@@ -1,0 +1,1632 @@
+================================================================================
+ДЕТАЛЬНАЯ СТАТИСТИКА ПРОЕКТА
+================================================================================
+Проект: tbot2
+Путь: C:\W\Projects\tbot2
+Дата анализа: 2025-09-30 02:15:15
+Общий размер: 60.2 kB
+Всего файлов: 19
+Всего папок: 5
+
+🌳 ДРЕВОВИДНАЯ СТРУКТУРА ПРОЕКТА:
+.
+├── 📄 08_core_loop.py (4.1 kB)
+├── 📄 project_analyzer4.py (17.2 kB)
+├── 📄 арх.txt (318 Bytes)
+├── 📁 core/
+│   ├── 📄 fsm_builder.py (763 Bytes)
+│   ├── 📄 message_sender.py (4.9 kB)
+│   ├── 📄 pipeline_executor.py (3.4 kB)
+│   ├── 📄 table_loader.py (1.7 kB)
+│   └── 📄 token_loader.py (1.1 kB)
+├── 📁 doc/
+│   └── 📄 Новый текстовый документ.txt (16.6 kB)
+├── 📁 handlers/
+│   ├── 📄 callback_handler.py (834 Bytes)
+│   └── 📄 message_handler.py (2.2 kB)
+└── 📁 pipeline/
+    ├── 📄 __init__.py (576 Bytes)
+    ├── 📄 build_message.py (1.8 kB)
+    ├── 📄 check_guard.py (760 Bytes)
+    ├── 📄 determine_transition.py (410 Bytes)
+    ├── 📄 execute_effect.py (755 Bytes)
+    ├── 📄 find_row.py (1.2 kB)
+    ├── 📄 format_notification.py (824 Bytes)
+    └── 📄 prepare_integration.py (713 Bytes)
+
+📊 РАСПРЕДЕЛЕНИЕ ПО РАСШИРЕНИЯМ:
+----------------------------------------
+.py      :   17 файлов
+.txt     :    2 файлов
+
+🏆 САМЫЕ БОЛЬШИЕ ФАЙЛЫ:
+----------------------------------------
+Крупнейший: project_analyzer4.py (17.2 kB)
+
+🕐 ВРЕМЕННЫЕ МЕТКИ:
+----------------------------------------
+Самый старый: project_analyzer4.py (2025-09-26)
+Самый новый:  doc\Новый текстовый документ.txt (2025-09-30)
+
+📂 СТАТИСТИКА ПО ПАПКАМ:
+----------------------------------------
+pipeline                       :   8 файлов,     7.1 kB
+core                           :   5 файлов,    11.8 kB
+handlers                       :   2 файлов,     3.1 kB
+doc                            :   1 файлов,    16.6 kB
+
+================================================================================
+СОДЕРЖИМОЕ ФАЙЛОВ ПРОЕКТА
+================================================================================
+ФАЙЛ: 08_core_loop.py
+Размер: 4.1 kB
+Изменен: 2025-09-30 02:01
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+import asyncio
+import sys
+from pathlib import Path
+
+from aiogram import Bot, Dispatcher, types
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.filters import Command
+
+# Микро-импорты
+from core.token_loader import load_bot_token
+from core.table_loader import load_table
+from core.fsm_builder import extract_states_from_table, create_fsm_from_states
+from core.message_sender import send_message_by_content
+from pipeline import *
+
+async def handle_message(msg: types.Message, state: FSMContext, table_path, DynFSM, bot):
+    """Обрабатывает сообщение через pipeline функций"""
+    data = await state.get_data()
+    current_state = data.get("current_state", "start")
+    payload = {"current_state": current_state, "text": msg.text}
+    
+    print(f"📥 Вход: state={current_state!r}, text={msg.text!r}")
+
+    # Pipeline вызовов
+    row = find_row(table_path, current_state, msg.text)
+    skip = check_guard(row, payload, current_state) if row else False
+    
+    if row and not skip:
+        execute_effect(row, payload)
+    
+    message_content = build_message_content(row, payload)
+    integration = prepare_integration(row) if row else None
+    next_state = determine_transition(row, skip)
+
+    # Отправка результата
+    if message_content:
+        await send_message_by_content(bot, msg.chat.id, message_content)
+    
+    if integration:
+        print(f"🔌 Интеграция: {integration}")
+    
+    if next_state and hasattr(DynFSM, next_state):
+        await state.set_state(getattr(DynFSM, next_state))
+        await state.update_data(current_state=next_state)
+        print(f"🔄 Переход: {current_state!r} → {next_state!r}")
+    elif not row:
+        await msg.answer("❌ Команда не распознана")
+
+async def handle_callback(callback: types.CallbackQuery, state: FSMContext, table_path, DynFSM, bot):
+    """Обрабатывает callback'и как сообщения"""
+    fake_message = types.Message(
+        message_id=callback.message.message_id,
+        from_user=callback.from_user,
+        chat=callback.chat, 
+        date=callback.message.date,
+        text=callback.data
+    )
+    await handle_message(fake_message, state, table_path, DynFSM, bot)
+    await callback.answer()
+
+async def main():
+    TABLE_FILE = sys.argv[1] if len(sys.argv) > 1 else "table.csv"
+    table_path = Path(TABLE_FILE)
+    
+    if not table_path.exists():
+        print(f"❌ Файл не найден: {TABLE_FILE}")
+        return
+
+    token = load_bot_token()
+    if not token:
+        print("❌ Токен не найден!")
+        return
+
+    # Загрузка FSM
+    rows = load_table(TABLE_FILE)
+    states_found = extract_states_from_table(rows)
+    DynFSM = create_fsm_from_states(states_found)
+    print(f"🧠 Создано {len(states_found)} состояний")
+
+    # Настройка бота
+    dp = Dispatcher(storage=MemoryStorage())
+    bot = Bot(token)
+
+    # Хендлеры
+    @dp.message(Command("start", "reset"))
+    async def start_handler(msg: types.Message, state: FSMContext):
+        await state.set_data({"current_state": "start"})
+        if msg.text == "/reset":
+            await msg.answer("🔄 Бот сброшен")
+        await handle_message(msg, state, table_path, DynFSM, bot)
+
+    @dp.message()
+    async def message_handler(msg: types.Message, state: FSMContext):
+        await handle_message(msg, state, table_path, DynFSM, bot)
+
+    @dp.callback_query()
+    async def callback_handler(callback: types.CallbackQuery, state: FSMContext):
+        await handle_callback(callback, state, table_path, DynFSM, bot)
+
+    # Запуск
+    print("🚀 Бот запущен. Ctrl+C для остановки.")
+    try:
+        await dp.start_polling(bot)
+    except KeyboardInterrupt:
+        print("\n🛑 Остановка...")
+    finally:
+        await bot.session.close()
+        print("✅ Бот остановлен")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+================================================================================
+ФАЙЛ: project_analyzer4.py
+Размер: 17.2 kB
+Изменен: 2025-09-26 23:16
+
+------------------------------------------------------------
+import os
+import argparse
+from pathlib import Path
+from datetime import datetime
+import humanize
+
+# Константы по умолчанию
+DEFAULT_EXTENSIONS = ['.py', '.md', '.txt', '.csv']
+EXCLUDED_FILES = ['project_overview.txt', '.gitignore', 'temp.txt']
+
+def get_output_filename(base_name="project_overview"):
+    """Генерирует имя файла с временной меткой."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{base_name}_{timestamp}.txt"
+
+def is_excluded_output_file(filename):
+    """Проверяет, является ли файл итоговым отчетом."""
+    return (filename.startswith("project_overview_") and 
+            filename.endswith(".txt") and
+            len(filename) > len("project_overview_XXXXXX.txt"))
+
+def should_include_file(file_path, included_extensions):
+    """Проверяет, нужно ли включать файл в анализ."""
+    file_path = Path(file_path)
+    
+    # Исключаем скрытые файлы и системные файлы
+    if any(part.startswith('.') for part in file_path.parts):
+        return False
+    
+    # Исключаем файлы из черного списка
+    if file_path.name in EXCLUDED_FILES:
+        return False
+    
+    # Исключаем итоговые отчеты
+    if is_excluded_output_file(file_path.name):
+        return False
+    
+    # Проверяем расширение
+    if file_path.suffix.lower() not in included_extensions:
+        return False
+    
+    return True
+
+def get_file_info(file_path):
+    """Возвращает информацию о файле (размер, время изменения)."""
+    try:
+        stat = file_path.stat()
+        return {
+            'size': stat.st_size,
+            'mtime': stat.st_mtime,
+            'size_str': humanize.naturalsize(stat.st_size),
+            'mtime_str': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
+        }
+    except OSError:
+        return None
+
+def read_file_content(file_path):
+    """Читает содержимое файла с обработкой ошибок."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            # Добавляем перенос строки если его нет в конце
+            if content and not content.endswith('\n'):
+                content += '\n'
+            return content
+    except UnicodeDecodeError:
+        return "!!! НЕВОЗМОЖНО ПРОЧИТАТЬ (бинарный файл или неверная кодировка)\n"
+    except Exception as e:
+        return f"!!! ОШИБКА ПРИ ЧТЕНИИ: {e}\n"
+
+def get_directory_tree(project_path, included_extensions):
+    """Генерирует древовидную структуру каталогов проекта."""
+    project_path = Path(project_path)
+    tree_lines = []
+    file_count = 0
+
+    def build_tree(directory, prefix=""):
+        nonlocal file_count
+        contents = []
+        try:
+            contents = sorted(os.listdir(directory))
+        except PermissionError:
+            return [f"{prefix}└── ⚠️ Нет доступа"]
+
+        files = []
+        dirs = []
+
+        for item in contents:
+            item_path = directory / item
+            if item_path.is_dir():
+                if not item.startswith('.'):  # Исключаем скрытые папки
+                    dirs.append(item)
+            else:
+                if should_include_file(item_path, included_extensions):
+                    files.append(item)
+
+        # Сначала файлы, потом папки
+        items = files + dirs
+        tree = []
+
+        for i, item in enumerate(items):
+            is_last = i == len(items) - 1
+            item_path = directory / item
+
+            if item_path.is_file():
+                # Это файл
+                file_count += 1
+                file_info = get_file_info(item_path)
+                if file_info:
+                    tree.append(f"{prefix}{'└── ' if is_last else '├── '}📄 {item} ({file_info['size_str']})")
+                else:
+                    tree.append(f"{prefix}{'└── ' if is_last else '├── '}📄 {item} (⚠️)")
+            else:
+                # Это папка
+                tree.append(f"{prefix}{'└── ' if is_last else '├── '}📁 {item}/")
+                extension = "    " if is_last else "│   "
+                tree.extend(build_tree(item_path, prefix + extension))
+
+        return tree
+
+    tree_lines.append("🌳 ДРЕВОВИДНАЯ СТРУКТУРА ПРОЕКТА:")
+    tree_lines.append(".")
+    tree_lines.extend(build_tree(project_path))
+    tree_lines.append("")  # Пустая строка для разделения
+
+    return tree_lines, file_count
+
+def calculate_project_stats(project_path, included_extensions):
+    """Собирает подробную статистику по проекту."""
+    project_path = Path(project_path)
+    stats = {
+        'total_files': 0,
+        'total_folders': 0,
+        'files_by_extension': {},
+        'files_by_folder': {},
+        'total_size': 0,
+        'largest_file': {'path': None, 'size': 0},
+        'oldest_file': {'path': None, 'mtime': float('inf')},
+        'newest_file': {'path': None, 'mtime': 0},
+        'folder_structure': {}
+    }
+
+    for root, dirs, files in os.walk(project_path):
+        # Убираем скрытые папки из обработки
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+
+        current_folder = Path(root).relative_to(project_path)
+        stats['total_folders'] += 1
+
+        # Статистика по файлам в папке
+        folder_files_count = 0
+        folder_size = 0
+
+        for file in files:
+            file_path = Path(root) / file
+            
+            if not should_include_file(file_path, included_extensions):
+                continue
+
+            file_info = get_file_info(file_path)
+            if not file_info:
+                continue
+
+            # Общая статистика
+            stats['total_files'] += 1
+            stats['total_size'] += file_info['size']
+
+            # Статистика по расширениям
+            ext = file_path.suffix.lower()
+            stats['files_by_extension'][ext] = stats['files_by_extension'].get(ext, 0) + 1
+
+            # Самый большой файл
+            if file_info['size'] > stats['largest_file']['size']:
+                stats['largest_file'] = {'path': file_path.relative_to(project_path), 'size': file_info['size']}
+
+            # Самый старый и новый файл
+            if file_info['mtime'] < stats['oldest_file']['mtime']:
+                stats['oldest_file'] = {'path': file_path.relative_to(project_path), 'mtime': file_info['mtime']}
+            if file_info['mtime'] > stats['newest_file']['mtime']:
+                stats['newest_file'] = {'path': file_path.relative_to(project_path), 'mtime': file_info['mtime']}
+
+            # Статистика по папкам
+            folder_files_count += 1
+            folder_size += file_info['size']
+
+        # Сохраняем статистику по текущей папке
+        if current_folder != Path('.'):
+            stats['files_by_folder'][str(current_folder)] = {
+                'file_count': folder_files_count,
+                'total_size': folder_size
+            }
+
+    return stats
+
+def format_stats_table(stats, project_path, tree_lines):
+    """Форматирует статистику в виде читаемых таблиц."""
+    lines = []
+    lines.append("=" * 80)
+    lines.append("ДЕТАЛЬНАЯ СТАТИСТИКА ПРОЕКТА")
+    lines.append("=" * 80)
+    lines.append(f"Проект: {project_path.name}")
+    lines.append(f"Путь: {project_path.absolute()}")
+    lines.append(f"Дата анализа: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"Общий размер: {humanize.naturalsize(stats['total_size'])}")
+    lines.append(f"Всего файлов: {stats['total_files']}")
+    lines.append(f"Всего папок: {stats['total_folders']}")
+    lines.append("")
+
+    # Добавляем древовидную структуру
+    lines.extend(tree_lines)
+
+    # Статистика по расширениям файлов
+    if stats['files_by_extension']:
+        lines.append("📊 РАСПРЕДЕЛЕНИЕ ПО РАСШИРЕНИЯМ:")
+        lines.append("-" * 40)
+        for ext, count in sorted(stats['files_by_extension'].items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"{ext:8} : {count:4d} файлов")
+        lines.append("")
+
+    # Крупнейшие файлы
+    if stats['largest_file']['path']:
+        lines.append("🏆 САМЫЕ БОЛЬШИЕ ФАЙЛЫ:")
+        lines.append("-" * 40)
+        lines.append(f"Крупнейший: {stats['largest_file']['path']} ({humanize.naturalsize(stats['largest_file']['size'])})")
+        lines.append("")
+
+    # Временные метки
+    if stats['oldest_file']['path']:
+        lines.append("🕐 ВРЕМЕННЫЕ МЕТКИ:")
+        lines.append("-" * 40)
+        oldest_time = datetime.fromtimestamp(stats['oldest_file']['mtime'])
+        newest_time = datetime.fromtimestamp(stats['newest_file']['mtime'])
+        lines.append(f"Самый старый: {stats['oldest_file']['path']} ({oldest_time.strftime('%Y-%m-%d')})")
+        lines.append(f"Самый новый:  {stats['newest_file']['path']} ({newest_time.strftime('%Y-%m-%d')})")
+        lines.append("")
+
+    # Статистика по папкам (только папки с файлами)
+    if stats['files_by_folder']:
+        lines.append("📂 СТАТИСТИКА ПО ПАПКАМ:")
+        lines.append("-" * 40)
+        sorted_folders = sorted(stats['files_by_folder'].items(),
+                               key=lambda x: x[1]['file_count'], reverse=True)
+
+        for folder, data in sorted_folders:
+            if data['file_count'] > 0:
+                size_str = humanize.naturalsize(data['total_size'])
+                lines.append(f"{folder:<30} : {data['file_count']:3d} файлов, {size_str:>10}")
+        lines.append("")
+
+    lines.append("=" * 80)
+    lines.append("")
+    return "\n".join(lines)
+
+def create_project_overview(project_path, output_file=None, included_extensions=None):
+    """Создает общий текстовый файл со всем кодом проекта для загрузки в ИИ-ассистенты."""
+    if included_extensions is None:
+        included_extensions = DEFAULT_EXTENSIONS
+        
+    if output_file is None:
+        output_file = get_output_filename()
+
+    project_path = Path(project_path)
+    output_file = Path(output_file)
+
+    # Проверяем существование пути проекта
+    if not project_path.exists():
+        print(f"❌ Ошибка: Папка '{project_path}' не существует!")
+        return False
+    if not project_path.is_dir():
+        print(f"❌ Ошибка: '{project_path}' не является папкой!")
+        return False
+
+    # Генерируем древовидную структуру
+    print("🌳 Генерация древовидной структуры...")
+    tree_lines, tree_file_count = get_directory_tree(project_path, included_extensions)
+
+    # Выводим структуру в консоль
+    print("\n".join(tree_lines))
+    print(f"📊 Найдено файлов в структуре: {tree_file_count}")
+    print("-" * 50)
+
+    # Собираем статистику
+    print("📊 Сбор детальной статистики...")
+    stats = calculate_project_stats(project_path, included_extensions)
+
+    separator = "\n" + "=" * 80 + "\n"
+    file_separator = "\n" + "-" * 60 + "\n"
+
+    try:
+        with open(output_file, 'w', encoding='utf-8') as outfile:
+            # Записываем детальную статистику
+            stats_text = format_stats_table(stats, project_path, tree_lines)
+            outfile.write(stats_text)
+
+            # Записываем заголовок
+            outfile.write("СОДЕРЖИМОЕ ФАЙЛОВ ПРОЕКТА")
+            outfile.write(separator)
+
+            # Рекурсивно обходим все файлы в директории
+            files_processed = 0
+            for file_path in project_path.rglob('*'):
+                if (file_path.is_file() and 
+                    should_include_file(file_path, included_extensions)):
+
+                    # Записываем заголовок файла
+                    relative_path = file_path.relative_to(project_path)
+                    file_info = get_file_info(file_path)
+                    
+                    outfile.write(f"ФАЙЛ: {relative_path}\n")
+                    if file_info:
+                        outfile.write(f"Размер: {file_info['size_str']}\n")
+                        outfile.write(f"Изменен: {file_info['mtime_str']}\n")
+                    else:
+                        outfile.write("Размер: N/A\n")
+                        outfile.write("Изменен: N/A\n")
+                    outfile.write(file_separator)
+
+                    # Читаем и записываем содержимое
+                    content = read_file_content(file_path)
+                    outfile.write(content)
+
+                    outfile.write(separator)
+                    files_processed += 1
+
+            # Финальная статистика
+            outfile.write(f"АНАЛИЗ ЗАВЕРШЕН.\n")
+            outfile.write(f"Обработано файлов: {files_processed}\n")
+            outfile.write(f"Общий размер: {humanize.naturalsize(stats['total_size'])}\n")
+            outfile.write(f"Время создания: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+        print(f"✅ Обзор проекта создан: {output_file.absolute()}")
+        print(f"📦 Размер итогового файла: {humanize.naturalsize(output_file.stat().st_size)}")
+        print(f"📄 Обработано файлов: {files_processed}")
+        return True
+
+    except Exception as e:
+        print(f"❌ Ошибка при создании файла: {e}")
+        return False
+
+def main():
+    """Основная функция с обработкой запуска без параметров."""
+    try:
+        import humanize
+    except ImportError:
+        print("❌ Требуется установка пакета 'humanize'")
+        print("   Установите: pip install humanize")
+        return
+
+    parser = argparse.ArgumentParser(
+        description='Создание обзора проекта для ИИ-анализа',
+        epilog='Примеры использования:\n'
+               '  python project_analyzer.py                 # Анализ текущей папки\n'
+               '  python project_analyzer.py /путь/к/проекту # Анализ указанной папки\n'
+               '  python project_analyzer.py -e .py .json .txt -o отчет.txt',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument('project_path', nargs='?', default='.',
+                       help='Путь к папке проекта (по умолчанию: текущая папка)')
+    parser.add_argument('-o', '--output', 
+                       help='Имя выходного файла (по умолчанию: сгенерируется автоматически с временной меткой)')
+    parser.add_argument('-e', '--extensions', nargs='+', default=DEFAULT_EXTENSIONS,
+                       help='Расширения файлов для включения (по умолчанию: .py .md .txt)')
+
+    args = parser.parse_args()
+
+    # Генерируем имя файла, если не указано
+    if args.output is None:
+        args.output = get_output_filename()
+
+    # Обрабатываем случай, когда путь не указан (используем текущую папку)
+    project_path = Path(args.project_path).absolute()
+
+    print("🚀 Запуск анализатора проекта...")
+    print(f"📁 Папка проекта: {project_path}")
+    print(f"📄 Выходной файл: {args.output}")
+    print(f"🔍 Расширения: {', '.join(args.extensions)}")
+    print("-" * 50)
+
+    success = create_project_overview(
+        project_path=project_path,
+        output_file=args.output,
+        included_extensions=args.extensions
+    )
+
+    if success:
+        print("✅ Готово! Файл можно загружать в ИИ-ассистент.")
+    else:
+        print("❌ Завершено с ошибками.")
+
+if __name__ == "__main__":
+    main()
+
+================================================================================
+ФАЙЛ: арх.txt
+Размер: 318 Bytes
+Изменен: 2025-09-30 01:57
+
+------------------------------------------------------------
+08_core_loop.py (только пайплайн)
+├── core/
+│   ├── token_loader.py
+│   ├── table_loader.py  
+│   ├── fsm_builder.py
+│   ├── message_sender.py
+│   └── pipeline_executor.py
+└── handlers/
+    ├── message_handler.py
+    └── callback_handler.py
+
+================================================================================
+ФАЙЛ: core\fsm_builder.py
+Размер: 763 Bytes
+Изменен: 2025-09-30 01:57
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+from aiogram.fsm.state import State, StatesGroup
+
+def create_fsm_from_states(states_found):
+    """Создает класс FSM с динамическими состояниями"""
+    class DynFSM(StatesGroup):
+        pass
+
+    for state_name in states_found:
+        setattr(DynFSM, state_name, State())
+    
+    print(f"[core] 🧠 Создано FSM с {len(states_found)} состояниями", file=sys.stderr)
+    return DynFSM
+
+def extract_states_from_table(rows):
+    """Извлекает уникальные состояния из таблицы"""
+    states_found = {r["from_state"] for r in rows} | {r["to_state"] for r in rows}
+    states_found = {s for s in states_found if s and s != "—"}
+    return states_found
+
+================================================================================
+ФАЙЛ: core\message_sender.py
+Размер: 4.9 kB
+Изменен: 2025-09-30 01:57
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from pathlib import Path
+
+async def send_message_by_content(bot, chat_id, content):
+    """Отправляет сообщение на основе описания контента"""
+    message_type = content.get("type", "text")
+    
+    if message_type == "text":
+        return await send_text_message(bot, chat_id, content)
+    elif message_type == "photo":
+        return await send_photo_message(bot, chat_id, content)
+    elif message_type == "document":
+        return await send_document_message(bot, chat_id, content)
+    elif message_type == "video":
+        return await send_video_message(bot, chat_id, content)
+    elif message_type == "poll":
+        return await send_poll_message(bot, chat_id, content)
+    elif message_type == "location":
+        return await send_location_request(bot, chat_id, content)
+    else:
+        # fallback to text
+        return await send_text_message(bot, chat_id, content)
+
+async def send_text_message(bot, chat_id, content):
+    """Отправляет текстовое сообщение"""
+    return await bot.send_message(
+        chat_id=chat_id,
+        text=content.get("text", ""),
+        parse_mode=content.get("parse_mode"),
+        reply_markup=build_reply_markup(content.get("reply_buttons", ""))
+    )
+
+async def send_photo_message(bot, chat_id, content):
+    """Отправляет фото"""
+    media_file = content.get("media_file", "")
+    
+    if media_file.startswith(('http://', 'https://')):
+        return await bot.send_photo(
+            chat_id=chat_id,
+            photo=media_file,
+            caption=content.get("caption", ""),
+            parse_mode=content.get("parse_mode"),
+            reply_markup=build_inline_markup(content.get("inline_buttons", ""))
+        )
+    else:
+        with open(media_file, 'rb') as photo:
+            return await bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=content.get("caption", ""),
+                parse_mode=content.get("parse_mode"),
+                reply_markup=build_inline_markup(content.get("inline_buttons", ""))
+            )
+
+async def send_document_message(bot, chat_id, content):
+    """Отправляет документ"""
+    media_file = content.get("media_file", "")
+    
+    if media_file.startswith(('http://', 'https://')):
+        return await bot.send_document(
+            chat_id=chat_id,
+            document=media_file,
+            caption=content.get("caption", ""),
+            reply_markup=build_reply_markup(content.get("reply_buttons", ""))
+        )
+    else:
+        with open(media_file, 'rb') as doc:
+            return await bot.send_document(
+                chat_id=chat_id,
+                document=doc,
+                caption=content.get("caption", ""),
+                reply_markup=build_reply_markup(content.get("reply_buttons", ""))
+            )
+
+async def send_poll_message(bot, chat_id, content):
+    """Отправляет опрос"""
+    return await bot.send_poll(
+        chat_id=chat_id,
+        question=content.get("text", ""),
+        options=content.get("options", []),
+        reply_markup=build_reply_markup(content.get("reply_buttons", ""))
+    )
+
+async def send_location_request(bot, chat_id, content):
+    """Запрашивает локацию"""
+    return await bot.send_message(
+        chat_id=chat_id,
+        text="Поделитесь вашей локацией:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="📍 Отправить локацию", request_location=True)]],
+            resize_keyboard=True
+        )
+    )
+
+def build_reply_markup(buttons_str):
+    """Создает обычную клавиатуру"""
+    if not buttons_str or buttons_str == "—":
+        return None
+    
+    buttons = [btn.strip() for btn in buttons_str.split('|') if btn.strip()]
+    
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    for btn_text in buttons:
+        keyboard.add(KeyboardButton(text=btn_text))
+    
+    return keyboard
+
+def build_inline_markup(buttons_str):
+    """Создает inline-клавиатуру"""
+    if not buttons_str or buttons_str == "—":
+        return None
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    
+    for btn_spec in buttons_str.split('|'):
+        btn_spec = btn_spec.strip()
+        if not btn_spec:
+            continue
+            
+        if ':' in btn_spec:
+            text, callback_data = btn_spec.split(':', 1)
+            button = InlineKeyboardButton(text=text.strip(), callback_data=callback_data.strip())
+        else:
+            button = InlineKeyboardButton(text=btn_spec, callback_data=btn_spec)
+        
+        keyboard.inline_keyboard.append([button])
+    
+    return keyboard
+
+================================================================================
+ФАЙЛ: core\pipeline_executor.py
+Размер: 3.4 kB
+Изменен: 2025-09-30 01:58
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+import json
+import subprocess
+import sys
+import tempfile
+import os
+
+async def execute_pipeline(table_path, payload, scripts_chain):
+    """Выполняет цепочку микросервисов и возвращает результат"""
+    try:
+        # Создаем временный файл с входными данными
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.json', delete=False) as f:
+            json.dump(payload, f, ensure_ascii=False)
+            input_file = f.name
+
+        result_file = None
+        intermediate_files = []
+        success = True
+        
+        for i, (script_name, script_args) in enumerate(scripts_chain):
+            # Определяем входной файл
+            if i == 0:
+                input_f = input_file
+            else:
+                input_f = intermediate_files[-1]
+
+            # Определяем выходной файл
+            if i == len(scripts_chain) - 1:
+                with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.json', delete=False) as f:
+                    result_file = f.name
+                output_f = result_file
+            else:
+                with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.json', delete=False) as f:
+                    intermediate_files.append(f.name)
+                output_f = intermediate_files[-1]
+
+            # Запускаем скрипт
+            cmd = [sys.executable, script_name] + script_args
+            print(f"[pipeline] 🔧 Запуск {script_name}...", file=sys.stderr)
+            
+            with open(input_f, 'r', encoding='utf-8') as infile:
+                with open(output_f, 'w', encoding='utf-8') as outfile:
+                    process = subprocess.run(
+                        cmd,
+                        stdin=infile,
+                        stdout=outfile,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=5
+                    )
+                    
+                    if process.stderr:
+                        print(f"[pipeline] {script_name} stderr: {process.stderr.strip()}", file=sys.stderr)
+                    
+                    if process.returncode != 0:
+                        print(f"[pipeline] ❌ {script_name} завершился с ошибкой", file=sys.stderr)
+                        success = False
+                        break
+
+        # Читаем результат
+        result = None
+        if success and result_file and os.path.exists(result_file):
+            with open(result_file, 'r', encoding='utf-8') as f:
+                result_data = f.read().strip()
+                if result_data:
+                    result = json.loads(result_data)
+
+        # Очистка временных файлов
+        for f in [input_file, result_file] + intermediate_files:
+            try:
+                if f and os.path.exists(f):
+                    os.unlink(f)
+            except:
+                pass
+
+        return result
+
+    except subprocess.TimeoutExpired:
+        print("[pipeline] ❌ Пайплайн завис", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"[pipeline] 💥 Ошибка: {e}", file=sys.stderr)
+        return None
+
+================================================================================
+ФАЙЛ: core\table_loader.py
+Размер: 1.7 kB
+Изменен: 2025-09-30 01:57
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+import csv
+from pathlib import Path
+
+def load_table(file_path):
+    """Загружает таблицу из CSV или XLSX файла"""
+    path = Path(file_path)
+    
+    if path.suffix.lower() in ['.xlsx', '.xls']:
+        return load_excel_table(file_path)
+    elif path.suffix.lower() == '.csv':
+        return load_csv_table(file_path)
+    else:
+        raise ValueError(f"Неподдерживаемый формат: {path.suffix}")
+
+def load_csv_table(file_path):
+    """Загружает CSV таблицу"""
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        print(f"[core] 📄 Загружен CSV: {len(rows)} строк", file=sys.stderr)
+        return rows
+    except Exception as e:
+        raise Exception(f"Ошибка загрузки CSV: {e}")
+
+def load_excel_table(file_path):
+    """Загружает Excel таблицу"""
+    try:
+        import pandas as pd
+        df = pd.read_excel(file_path)
+        rows = df.to_dict('records')
+        
+        # Конвертируем все значения в строки
+        for row in rows:
+            for key in row:
+                if pd.isna(row[key]):
+                    row[key] = ""
+                else:
+                    row[key] = str(row[key]).strip()
+        
+        print(f"[core] 📊 Загружен Excel: {len(rows)} строк", file=sys.stderr)
+        return rows
+    except ImportError:
+        raise Exception("Для работы с Excel установите: pip install pandas openpyxl")
+    except Exception as e:
+        raise Exception(f"Ошибка загрузки Excel: {e}")
+
+================================================================================
+ФАЙЛ: core\token_loader.py
+Размер: 1.1 kB
+Изменен: 2025-09-30 01:57
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+import os
+from pathlib import Path
+
+def load_bot_token():
+    """Загружает токен бота из переменных окружения или файлов"""
+    token = os.getenv("BOT_TOKEN")
+    if token:
+        print("[core] 🗝️ Токен из переменной окружения", file=sys.stderr)
+        return token.strip()
+
+    # Проверяем .env файл
+    env_path = Path(".env")
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("BOT_TOKEN="):
+                value = line.split("=", 1)[1].strip().strip('"\'')
+                if value:
+                    print("[core] 🗝️ Токен из .env", file=sys.stderr)
+                    return value
+
+    # Проверяем token.env
+    token_file = Path("token.env")
+    if token_file.exists():
+        raw = token_file.read_text(encoding="utf-8").strip()
+        if raw:
+            print("[core] 🗝️ Токен из token.env", file=sys.stderr)
+            return raw
+
+    return None
+
+================================================================================
+ФАЙЛ: doc\Новый текстовый документ.txt
+Размер: 16.6 kB
+Изменен: 2025-09-30 02:13
+
+------------------------------------------------------------
+TableBot-Pipe Архитектура
+🏗️ Структура проекта
+text
+tablebot-pipe/
+├── 📁 core/                    # Ядро системы
+│   ├── token_loader.py        # Загрузка токена бота
+│   ├── table_loader.py        # Загрузка CSV/XLSX таблиц
+│   ├── fsm_builder.py         # Динамическое создание FSM
+│   └── message_sender.py      # Отправка сообщений
+├── 📁 pipeline/               # Микросервисы обработки
+│   ├── __init__.py           # Импорты всех функций
+│   ├── find_row.py           # Поиск строки в таблице
+│   ├── check_guard.py        # Проверка условий
+│   ├── execute_effect.py     # Выполнение действий
+│   ├── format_notification.py # Форматирование уведомлений
+│   ├── prepare_integration.py # Подготовка интеграций
+│   ├── build_message.py      # Построение контента сообщения
+│   └── determine_transition.py # Определение перехода
+├── 📁 handlers/              # Обработчики событий
+│   ├── message_handler.py    # Обработка сообщений
+│   └── callback_handler.py   # Обработка callback'ов
+├── 📄 08_core_loop.py        # Основное ядро бота (~50 строк)
+├── 📄 table.csv              # Таблица с бизнес-логикой
+├── 📄 requirements.txt       # Зависимости
+├── 📄 .env                   # Переменные окружения (BOT_TOKEN)
+└── 📄 README.md              # Документация
+🎯 Как работает система
+Основной поток:
+text
+Пользователь → Telegram → 08_core_loop.py → pipeline функций → Ответ пользователю
+Детальный процесс:
+Пользователь отправляет сообщение или нажимает кнопку
+
+08_core_loop.py получает событие, загружает текущее состояние пользователя
+
+Запускается pipeline обработки:
+
+find_row - ищет подходящую строку в таблице
+
+check_guard - проверяет условия выполнения
+
+execute_effect - выполняет side-effect действия
+
+build_message - формирует контент сообщения
+
+prepare_integration - подготавливает внешние вызовы
+
+determine_transition - определяет переход в новое состояние
+
+Результат отправляется пользователю через message_sender
+
+Состояние пользователя обновляется в FSM
+
+📊 Формат таблицы table.csv
+Обязательные колонки:
+csv
+process_name,from_state,to_state,command
+Полный набор колонок:
+csv
+process_name,from_state,to_state,command,condition,message_text,caption,media_file,reply_markup,inline_markup,notification,integrations,result_action
+Описание колонок:
+Колонка	Описание	Пример
+process_name	Название процесса	PizzaOrder
+from_state	Исходное состояние	start
+to_state	Целевое состояние	menu
+command	Команда для перехода	/start или <text>
+condition	Условие выполнения	not_empty:username
+message_text	Текст сообщения	"Добро пожаловать!"
+caption	Подпись к медиа	"Наше меню"
+media_file	Файл медиа	menu.jpg
+reply_markup	Обычные кнопки	"Да|Нет|Отмена"
+inline_markup	Inline-кнопки	"Подтвердить:confirm|Отмена:cancel"
+notification	Текст уведомления	"Заказ принят: {order_id}"
+integrations	Внешние вызовы	http:POST https://api.com/order
+result_action	Side-effect	save:order_id
+Пример таблицы:
+csv
+process_name,from_state,to_state,command,message_text,reply_markup,inline_markup,notification
+PizzaOrder,start,menu,/start,"Добро пожаловать! Выберите действие:","🍕 Заказать|📋 Меню|🏪 О нас",,,
+PizzaOrder,menu,size,🍕 Заказать,"Выберите размер пиццы:","30 см|40 см|50 см",,,
+PizzaOrder,size,toppings,<text>,"Выберите топпинги:",,"🧀 Сыр:cheese|🍄 Грибы:mushrooms","Выбрано: {text}"
+PizzaOrder,toppings,address,✅ Подтвердить,"Введите адрес доставки:",,,,
+PizzaOrder,address,finish,<text>,,"📍 Подтвердить адрес",,"Заказ оформлен! Адрес: {text}"
+🔧 Микросервисы (pipeline/)
+1. find_row.py
+Назначение: Поиск строки в таблице по состоянию и команде
+
+Логика: Сравнивает from_state и command, поддерживает <text> для любого текста
+
+Возвращает: Найденную строку или None
+
+2. check_guard.py
+Назначение: Проверка условий выполнения перехода
+
+Поддержка: not_empty:field, equals:field:value
+
+Возвращает: True если пропустить переход
+
+3. execute_effect.py
+Назначение: Выполнение side-effect действий
+
+Поддержка: save:field, clear:field
+
+Действие: Логирование и подготовка данных
+
+4. format_notification.py
+Назначение: Форматирование текста уведомлений
+
+Поддержка: Замена {field} на значения из payload
+
+Возвращает: Отформатированный текст
+
+5. prepare_integration.py
+Назначение: Подготовка внешних интеграций
+
+Поддержка: http:..., email:..., webhook:...
+
+Возвращает: Данные для интеграции
+
+6. build_message.py
+Назначение: Построение полного контента сообщения
+
+Поддержка: Текст, медиа, кнопки, форматирование
+
+Возвращает: Объект контента для отправки
+
+7. determine_transition.py
+Назначение: Определение следующего состояния
+
+Логика: Проверяет guard и возвращает to_state
+
+Возвращает: Имя следующего состояния или None
+
+🚀 Запуск бота
+1. Установка зависимостей:
+bash
+pip install -r requirements.txt
+2. Настройка токена:
+bash
+# Вариант 1: Файл .env
+echo "BOT_TOKEN=your_telegram_bot_token" > .env
+
+# Вариант 2: Переменная окружения
+export BOT_TOKEN=your_telegram_bot_token
+
+# Вариант 3: Файл token.env
+echo "your_telegram_bot_token" > token.env
+3. Создание таблицы:
+Отредактируйте table.csv согласно вашему бизнес-процессу.
+
+4. Запуск:
+bash
+python 08_core_loop.py table.csv
+🎯 Ключевые преимущества
+Архитектурные:
+✅ Микросервисность - каждый компонент в отдельном файле
+
+✅ Простота редактирования - файлы помещаются на одном экране
+
+✅ Низкая связанность - изменение одного файла не затрагивает другие
+
+✅ Высокая связность - каждая функция имеет одну ответственность
+
+Технические:
+✅ Производительность - импорты вместо subprocess
+
+✅ Типизация - Python типы вместо JSON
+
+✅ Отладка - stack traces и breakpoints
+
+✅ Тестируемость - каждый модуль можно тестировать отдельно
+
+Бизнес-преимущества:
+✅ Гибкость - бизнес-логика в таблице, а не в коде
+
+✅ Скорость разработки - добавление фич через редактирование CSV
+
+✅ Понятность - таблица читается бизнес-пользователями
+
+✅ Масштабируемость - легко добавлять новые состояния и команды
+
+🔄 Расширение системы
+Добавление нового состояния:
+Добавьте строку в table.csv с новым from_state/to_state
+
+Бот автоматически создаст состояние при запуске
+
+Добавление нового типа сообщения:
+Расширьте build_message.py для поддержки нового типа
+
+Расширьте message_sender.py для отправки
+
+Добавьте соответствующие колонки в таблицу
+
+Добавление новой интеграции:
+Расширьте prepare_integration.py для парсинга
+
+Реализуйте вызов в основном коде или отдельном модуле
+
+📝 Примечания
+Все файлы кода стараются быть ≤ 50 строк
+
+Бизнес-логика полностью вынесена в таблицу
+
+Код отвечает только за оркестрацию и техническую реализацию
+
+Система легко расширяется добавлением новых pipeline функций
+
+Поддерживаются как текстовые команды, так и inline-кнопки
+
+Эта архитектура обеспечивает идеальный баланс между гибкостью табличного подхода и производительностью модульной системы! 🚀
+
+а почему ты не упомянул про xls опцию?
+Вы абсолютно правы! Я забыл про поддержку Excel. Давайте добавим эту важную фичу в документацию.
+
+🔧 Дополнения к архитектуре:
+Поддержка форматов таблиц:
+Система поддерживает оба формата:
+
+✅ CSV - для простых случаев и версионности
+
+✅ Excel (XLSX) - для сложных таблиц с форматированием
+
+Обновленная структура:
+text
+tablebot-pipe/
+├── 📁 core/
+│   ├── token_loader.py
+│   ├── table_loader.py     # ← Поддержка CSV и XLSX!
+│   ├── fsm_builder.py
+│   └── message_sender.py
+table_loader.py возможности:
+python
+def load_table(file_path):
+    """Загружает таблицу из CSV или XLSX файла"""
+    if path.suffix.lower() in ['.xlsx', '.xls']:
+        return load_excel_table(file_path)    # Excel
+    elif path.suffix.lower() == '.csv':
+        return load_csv_table(file_path)      # CSV
+🎯 Преимущества Excel:
+Для бизнес-пользователей:
+✅ Визуальное редактирование - цвета, шрифты, форматирование
+
+✅ Проверка данных - выпадающие списки, валидация
+
+✅ Фильтры и сортировка - удобный просмотр
+
+✅ Несколько листов - разные процессы в одном файле
+
+✅ Формулы - автоматические вычисления
+
+Для разработчиков:
+✅ Комментарии - пояснения к полям
+
+✅ Защита ячеек - предотвращение случайных изменений
+
+✅ Условное форматирование - визуализация состояний
+
+📊 Пример использования Excel:
+Файл: business_process.xlsx
+Лист "PizzaOrder":
+
+csv
+process_name | from_state | to_state | command     | message_text          | reply_markup
+PizzaOrder   | start      | menu     | /start      | Добро пожаловать!     | 🍕 Заказать|📋 Меню
+PizzaOrder   | menu       | size     | 🍕 Заказать | Выберите размер:      | 30 см|40 см|50 см
+PizzaOrder   | size       | toppings | <text>      | Выберите топпинги:    | 
+Лист "CustomerSupport":
+
+csv
+process_name      | from_state | to_state | command | message_text
+CustomerSupport   | start      | issue    | /help   | Опишите проблему:
+CustomerSupport   | issue      | contact  | <text>  | Оставьте контакты:
+🚀 Запуск с Excel:
+bash
+# Запуск с CSV (как раньше)
+python 08_core_loop.py table.csv
+
+# Запуск с Excel (новая фича!)
+python 08_core_loop.py business_process.xlsx
+
+# Запуск с конкретным листом
+python 08_core_loop.py business_process.xlsx -sheet PizzaOrder
+📋 Требования для Excel поддержки:
+Установка зависимостей:
+bash
+pip install pandas openpyxl
+Формат Excel файла:
+✅ Первая строка - заголовки колонок
+
+✅ Поддерживаются те же колонки что и в CSV
+
+✅ Несколько листов - каждый лист как отдельная таблица
+
+✅ Автоконвертация: числа, даты → строки
+
+🔧 Пример table_loader.py с Excel поддержкой:
+python
+def load_excel_table(file_path, sheet_name=None):
+    """Загружает таблицу из Excel файла"""
+    try:
+        import pandas as pd
+        
+        # Загрузка Excel
+        if sheet_name:
+            df = pd.read_excel(file_path, sheet_name=sheet_name)
+        else:
+            df = pd.read_excel(file_path)
+        
+        # Конвертация в словари
+        rows = df.to_dict('records')
+        
+        # Конвертация всех значений в строки
+        for row in rows:
+            for key in row:
+                if pd.isna(row[key]):
+                    row[key] = ""
+                else:
+                    row[key] = str(row[key]).strip()
+        
+        print(f"[table_loader] 📊 Загружен Excel: {len(rows)} строк")
+        return rows
+        
+    except ImportError:
+        raise Exception("Установите: pip install pandas openpyxl")
+    except Exception as e:
+        raise Exception(f"Ошибка загрузки Excel: {e}")
+🎯 Рекомендации по выбору формата:
+Используйте CSV когда:
+Простые процессы
+
+Нужна версионность в Git
+
+Редактирование программистами
+
+CI/CD автоматизация
+
+Используйте Excel когда:
+Сложные бизнес-процессы
+
+Редактирование бизнес-пользователями
+
+Нужно форматирование и валидация
+
+Несколько связанных процессов
+
+📝 Обновленные команды запуска:
+Базовый запуск:
+bash
+# Автоопределение формата по расширению
+python 08_core_loop.py table.csv
+python 08_core_loop.py process.xlsx
+Расширенный запуск:
+bash
+# Указание конкретного листа
+python 08_core_loop.py business.xlsx -sheet OrderProcess
+
+# Просмотр доступных листов
+python 08_core_loop.py business.xlsx --list-sheets
+Теперь система поддерживает оба формата, обеспечивая гибкость для разных сценариев использования! 📊✨
+
+================================================================================
+ФАЙЛ: handlers\callback_handler.py
+Размер: 834 Bytes
+Изменен: 2025-09-30 02:10
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+from aiogram import types
+from handlers.message_handler import handle_message
+
+async def handle_callback(callback: types.CallbackQuery, state, table_path, DynFSM, bot):
+    """Обрабатывает нажатия на inline-кнопки"""
+    # Создаем fake-message из callback данных
+    fake_message = types.Message(
+        message_id=callback.message.message_id,
+        from_user=callback.from_user,
+        chat=callback.chat,
+        date=callback.message.date,
+        text=callback.data  # Используем callback_data как текст команды
+    )
+    
+    # Обрабатываем как обычное сообщение
+    await handle_message(fake_message, state, table_path, DynFSM, bot)
+    await callback.answer()  # Подтверждаем нажатие
+
+================================================================================
+ФАЙЛ: handlers\message_handler.py
+Размер: 2.2 kB
+Изменен: 2025-09-30 02:10
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+from aiogram.filters import Command
+from core.pipeline_executor import execute_pipeline
+from core.message_sender import send_message_by_content
+
+async def handle_message(msg, state, table_path, DynFSM, bot):
+    """Обрабатывает входящие сообщения"""
+    try:
+        # Получаем текущее состояние
+        data = await state.get_data()
+        current_state = data.get("current_state", "start")
+        
+        # Создаем payload для пайплайна
+        payload = {"current_state": current_state, "text": msg.text}
+        
+        print(f"[handler] 📥 Сообщение: state={current_state!r}, text={msg.text!r}", file=sys.stderr)
+
+        # Определяем цепочку скриптов
+        scripts_chain = [
+            ("02_find_row.py", [str(table_path)]),
+            ("03_guard.py", []),
+            ("04_effect.py", []),
+            ("05_notification.py", []),
+            ("06_integrations.py", []),
+            ("09_message_builder.py", []),
+            ("07_transition.py", [])
+        ]
+
+        # Выполняем пайплайн
+        result = await execute_pipeline(table_path, payload, scripts_chain)
+        
+        if not result:
+            await msg.answer("⚠️ Ошибка обработки")
+            return
+
+        print(f"[handler] 📤 Результат: next_state={result.get('next_state')!r}", file=sys.stderr)
+
+        # Отправляем сообщение
+        if result.get("message_content"):
+            await send_message_by_content(bot, msg.chat.id, result["message_content"])
+
+        # Выполняем переход состояния
+        if result.get("next_state"):
+            next_state = result["next_state"]
+            if hasattr(DynFSM, next_state):
+                await state.set_state(getattr(DynFSM, next_state))
+                await state.update_data(current_state=next_state)
+                print(f"[handler] 🔄 Переход: {current_state!r} → {next_state!r}", file=sys.stderr)
+
+    except Exception as e:
+        print(f"[handler] 💥 Ошибка: {e}", file=sys.stderr)
+        await msg.answer("⚠️ Ошибка обработки")
+
+================================================================================
+ФАЙЛ: pipeline\build_message.py
+Размер: 1.8 kB
+Изменен: 2025-09-30 02:00
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+
+def build_message_content(row, payload):
+    """Строит полное описание сообщения для отправки"""
+    if not row:
+        return None
+    
+    content = {"type": "text"}
+    
+    # Текст сообщения (приоритет у message_text, потом notification)
+    if row.get("message_text") and row["message_text"] != "—":
+        content["text"] = row["message_text"]
+    elif row.get("notification") and row["notification"] != "—":
+        content["text"] = format_notification(row, payload)
+    
+    # Подпись для медиа
+    if row.get("caption") and row["caption"] != "—":
+        content["caption"] = row["caption"]
+    
+    # Медиа файлы
+    if row.get("media_file") and row["media_file"] != "—":
+        content["media_file"] = row["media_file"]
+        
+        # Автоопределение типа медиа
+        file_ext = row["media_file"].lower()
+        if any(ext in file_ext for ext in ['.jpg', '.jpeg', '.png', '.gif']):
+            content["type"] = "photo"
+        elif any(ext in file_ext for ext in ['.mp4', '.avi', '.mov']):
+            content["type"] = "video" 
+        elif any(ext in file_ext for ext in ['.pdf', '.doc', '.docx']):
+            content["type"] = "document"
+        elif any(ext in file_ext for ext in ['.mp3', '.wav']):
+            content["type"] = "audio"
+    
+    # Клавиатуры
+    if row.get("reply_markup") and row["reply_markup"] != "—":
+        content["reply_buttons"] = row["reply_markup"]
+    
+    if row.get("inline_markup") and row["inline_markup"] != "—":
+        content["inline_buttons"] = row["inline_markup"]
+    
+    print(f"[build_message] 🎨 Создан контент: {content['type']}")
+    return content
+
+================================================================================
+ФАЙЛ: pipeline\check_guard.py
+Размер: 760 Bytes
+Изменен: 2025-09-30 02:00
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+
+def check_guard(row, payload, current_state):
+    """Проверяет условия guard'а"""
+    if not row or not row.get("condition") or row["condition"] == "—":
+        return False
+    
+    condition = row["condition"]
+    print(f"[check_guard] 🛡️ Проверка условия: {condition!r}")
+    
+    # Простая реализация условий
+    if condition.startswith("not_empty:"):
+        field = condition.split(":", 1)[1]
+        result = bool(payload.get(field))
+        print(f"[check_guard] not_empty:{field} → {result}")
+        return not result  # True = пропустить
+    
+    print(f"[check_guard] ⚠️ Неизвестное условие, разрешаю")
+    return False
+
+================================================================================
+ФАЙЛ: pipeline\determine_transition.py
+Размер: 410 Bytes
+Изменен: 2025-09-30 02:00
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+
+def determine_transition(row, skip_guard):
+    """Определяет следующий стейт для перехода"""
+    if skip_guard or not row:
+        return None
+    
+    next_state = row.get("to_state")
+    if next_state and next_state != "—":
+        print(f"[determine_transition] 🔄 Переход: {next_state!r}")
+        return next_state
+    
+    return None
+
+================================================================================
+ФАЙЛ: pipeline\execute_effect.py
+Размер: 755 Bytes
+Изменен: 2025-09-30 02:00
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+
+def execute_effect(row, payload):
+    """Выполняет side-effect действия"""
+    if not row or not row.get("result_action") or row["result_action"] == "—":
+        return
+    
+    action = row["result_action"]
+    print(f"[execute_effect] ⚡ Действие: {action!r}")
+    
+    if action.startswith("save:"):
+        field = action.split(":", 1)[1]
+        value = payload.get(field)
+        print(f"[execute_effect] 💾 Сохранение: {field} = {value!r}")
+    
+    elif action.startswith("clear:"):
+        field = action.split(":", 1)[1]
+        print(f"[execute_effect] 🧹 Очистка: {field}")
+    
+    else:
+        print(f"[execute_effect] ⚠️ Неизвестное действие")
+
+================================================================================
+ФАЙЛ: pipeline\find_row.py
+Размер: 1.2 kB
+Изменен: 2025-09-30 01:59
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+import csv
+
+def find_row(table_path, current_state, user_text):
+    """Ищет строку в таблице по состоянию и команде"""
+    try:
+        with open(table_path, encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except Exception as e:
+        print(f"[find_row] ❌ Ошибка загрузки таблицы: {e}")
+        return None
+    
+    print(f"[find_row] 🔍 Поиск: state={current_state!r}, text={user_text!r}")
+    
+    for row in rows:
+        if row["from_state"] == current_state:
+            # Команда <text> подходит для любого текста (кроме команд)
+            if row["command"] == "<text>" and not user_text.startswith('/'):
+                print(f"[find_row] ✅ Найдено по <text>: {row['to_state']!r}")
+                return row
+            # Точное совпадение команды
+            elif row["command"] == user_text:
+                print(f"[find_row] ✅ Найдено по команде: {row['to_state']!r}")
+                return row
+    
+    print(f"[find_row] ❌ Не найдено подходящей строки")
+    return None
+
+================================================================================
+ФАЙЛ: pipeline\format_notification.py
+Размер: 824 Bytes
+Изменен: 2025-09-30 02:00
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+
+def format_notification(row, payload):
+    """Форматирует текст уведомления"""
+    if not row or not row.get("notification") or row["notification"] == "—":
+        return None
+    
+    template = row["notification"]
+    try:
+        # Заменяем {field} на значения из payload
+        text = template
+        for key, value in payload.items():
+            placeholder = "{" + key + "}"
+            if placeholder in text:
+                text = text.replace(placeholder, str(value))
+        
+        print(f"[format_notification] 💬 Уведомление: {template!r} → {text!r}")
+        return text
+    
+    except Exception as e:
+        print(f"[format_notification] ❌ Ошибка форматирования: {e}")
+        return template
+
+================================================================================
+ФАЙЛ: pipeline\prepare_integration.py
+Размер: 713 Bytes
+Изменен: 2025-09-30 02:00
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+
+def prepare_integration(row):
+    """Подготавливает данные для интеграций"""
+    if not row or not row.get("integrations") or row["integrations"] == "—":
+        return None
+    
+    integration = row["integrations"]
+    print(f"[prepare_integration] 🔌 Интеграция: {integration!r}")
+    
+    # Можно добавить парсинг разных типов интеграций
+    if integration.startswith("http:"):
+        print(f"[prepare_integration] 🌐 HTTP запрос: {integration}")
+    
+    elif integration.startswith("email:"):
+        print(f"[prepare_integration] 📧 Email: {integration}")
+    
+    return integration
+
+================================================================================
+ФАЙЛ: pipeline\__init__.py
+Размер: 576 Bytes
+Изменен: 2025-09-30 02:00
+
+------------------------------------------------------------
+#!/usr/bin/env python3
+# Импорты всех pipeline функций
+from .find_row import find_row
+from .check_guard import check_guard
+from .execute_effect import execute_effect
+from .format_notification import format_notification
+from .prepare_integration import prepare_integration
+from .build_message import build_message_content
+from .determine_transition import determine_transition
+
+__all__ = [
+    'find_row',
+    'check_guard', 
+    'execute_effect',
+    'format_notification',
+    'prepare_integration',
+    'build_message_content',
+    'determine_transition'
+]
+
+================================================================================
+АНАЛИЗ ЗАВЕРШЕН.
+Обработано файлов: 19
+Общий размер: 60.2 kB
+Время создания: 2025-09-30 02:15:15

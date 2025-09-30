@@ -1,0 +1,6 @@
+process_name,from_state,to_state,command,message_text,reply_markup,inline_markup,notification
+PizzaOrder,start,menu,/start,"Добро пожаловать! Выберите действие:","🍕 Заказать|📋 Меню|🏪 О нас",,,
+PizzaOrder,menu,size,🍕 Заказать,"Выберите размер пиццы:","30 см|40 см|50 см",,,
+PizzaOrder,size,toppings,<text>,"Выберите топпинги:",,"🧀 Сыр:cheese|🍄 Грибы:mushrooms","Выбрано: {text}"
+PizzaOrder,toppings,address,✅ Подтвердить,"Введите адрес доставки:",,,,
+PizzaOrder,address,finish,<text>,,"📍 Подтвердить адрес",,"Заказ оформлен! Адрес: {text}"

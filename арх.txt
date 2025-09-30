@@ -1,0 +1,10 @@
+08_core_loop.py (только пайплайн)
+├── core/
+│   ├── token_loader.py
+│   ├── table_loader.py  
+│   ├── fsm_builder.py
+│   ├── message_sender.py
+│   └── pipeline_executor.py
+└── handlers/
+    ├── message_handler.py
+    └── callback_handler.py

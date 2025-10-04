@@ -1,3 +1,7 @@
+# Copyright (C) 2025 Leonid Yasin
+# This file is part of Tablebot-pipe-Advanced and is licensed under the GNU GPL v3.0.
+# See the LICENSE file for details.
+# tablebot-pipe-advanced\project_analyzer4.py
 import os
 import argparse
 from pathlib import Path

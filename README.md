@@ -196,9 +196,9 @@
 
 ## 📄 Лицензия
 
-MIT
-```
+## License
 
+This project is licensed under the GNU GPL v3.0 license - see the [LICENSE](LICENSE) file for details.
 ---
 
 Этот `README.md` теперь включает:

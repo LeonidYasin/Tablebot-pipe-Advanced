@@ -3,9 +3,12 @@
 # This file is part of Tablebot-pipe-Advanced and is licensed under the GNU GPL v3.0.
 # See the LICENSE file for details.
 #!/usr/bin/env python3
+import signal
 import asyncio
 import sys
 from pathlib import Path
+
+
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.context import FSMContext
@@ -55,10 +58,15 @@ async def main():
     print("[main] 🔄 Начинаю загрузку командного меню из таблицы...", file=sys.stderr)
     try:
         cmds = extract_commands(TABLE_FILE) # <- Вызов функции из core.commands_loader
-        await bot.set_my_commands(cmds)     # <- Установка команд боту
-        print(f"[main] ✅ Командное меню обновлено: {len(cmds)} команд.", file=sys.stderr)
+        if cmds:  # Проверяем, что команды найдены
+            await bot.set_my_commands(cmds)     # <- Установка команд боту
+            print(f"[main] ✅ Командное меню обновлено: {len(cmds)} команд.", file=sys.stderr)
+        else:
+            print(f"[main] ⚠️ Команды не найдены в таблице, меню не обновлено.", file=sys.stderr)
     except Exception as e:
         print(f"[main] ❌ Ошибка при установке командного меню: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
     # --- КОНЕЦ: Добавленный код ---
 
     # Хендлеры
@@ -87,13 +95,19 @@ async def main():
 
     # Запуск
     print("🚀 Бот запущен. Ctrl+C для остановки.")
+    
     try:
         await dp.start_polling(bot)
     except KeyboardInterrupt:
-        print("\n🛑 Остановка...")
+        print("\n🛑 Остановка по запросу пользователя...")
     finally:
-        await bot.session.close()
-        print("✅ Бот остановлен")
+        print("⏳ Завершаем работу...")
+        try:
+            await bot.session.close()
+            print("✅ Бот остановлен")
+        except:
+            print("✅ Бот остановлен (сессия уже закрыта)")
+
 
 
 # --- Обработчик сообщений ---
@@ -122,7 +136,7 @@ async def handle_message(msg: types.Message, state: FSMContext, table_path, DynF
         skip = check_guard(row, payload, current_state)
         
         if not skip:
-            execute_effect(row, payload, bot)
+            await execute_effect(row, payload, bot)  # ДОБАВЛЕНО: await
         
         message_content = build_message_content(row, payload)
         integration = prepare_integration(row)
@@ -151,12 +165,6 @@ async def handle_message(msg: types.Message, state: FSMContext, table_path, DynF
         traceback.print_exc()
         await bot.send_message(msg.chat.id, "⚠️ Ошибка обработки")
 
-    except Exception as e: 
-        print(f"💥 Ошибка в handle_message: {e}")
-        import traceback
-        traceback.print_exc()
-        await bot.send_message(msg.chat.id, "⚠️ Ошибка обработки")
-
 
 # --- Обработчик callback'ов ---
 async def handle_callback(callback: types.CallbackQuery, state: FSMContext, table_path, DynFSM, bot):
@@ -176,4 +184,7 @@ async def handle_callback(callback: types.CallbackQuery, state: FSMContext, tabl
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n✅ Программа завершена")

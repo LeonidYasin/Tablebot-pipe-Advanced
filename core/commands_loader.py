@@ -28,13 +28,27 @@ def extract_commands(table_path):
         print(f"[commands] 🔍 Доступные колонки: {', '.join(headers)}", file=sys.stderr)
 
     for i, r in enumerate(rows):
-        # Поиск по именам колонок, а не по позициям
-        cmd = (r.get("bot_command") or "").strip()
-        desc = (r.get("bot_description") or "").strip()
+        # БЕЗОПАСНОЕ извлечение значений с проверкой на None
+        cmd = None
+        desc = None
+        
+        # Безопасное извлечение bot_command
+        cmd_raw = r.get("bot_command")
+        if cmd_raw is not None:
+            cmd = str(cmd_raw).strip()
+        
+        # Безопасное извлечение bot_description  
+        desc_raw = r.get("bot_description")
+        if desc_raw is not None:
+            desc = str(desc_raw).strip()
 
-        # Детальная отладка для первых нескольких строк
-        if i < 3:  # Показываем отладку для первых 3 строк
-            all_columns = {k: v for k, v in r.items() if v.strip()}
+        # Детальная отладка для первых нескольких строк (с безопасной проверкой)
+        if i < 3:
+            # ИСПРАВЛЕНИЕ: безопасная проверка значений
+            all_columns = {}
+            for k, v in r.items():
+                if v is not None and str(v).strip():  # Проверяем что не None и не пустая строка
+                    all_columns[k] = str(v).strip()
             print(f"[commands] 🔍 Строка {i+1} значимые колонки: {all_columns}", file=sys.stderr)
 
         if cmd and desc:

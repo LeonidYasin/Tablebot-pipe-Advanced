@@ -5,7 +5,7 @@
 #!/usr/bin/env python3
 import sys
 
-def execute_effect(row, payload, bot):
+async def execute_effect(row, payload, bot):  # ДОБАВЛЕНО: async
     """Выполняет side-effect действия из result_action"""
     # БЕЗОПАСНОЕ ИЗВЛЕЧЕНИЕ - используем .get() с значением по умолчанию
     result_action = (row.get("result_action") or "").strip()
@@ -58,7 +58,7 @@ def execute_effect(row, payload, bot):
                         # Отправляем сообщение (нужен доступ к bot)
                         if bot:
                             from core.message_sender import send_message_by_content
-                            await send_message_by_content(bot, target_chat_id, {"type": "text", "text": message})
+                            await send_message_by_content(bot, target_chat_id, {"type": "text", "text": message})  # ДОБАВЛЕНО: await
                             print(f"[execute_effect] 📨 Уведомление отправлено в чат {target_chat_id}", file=sys.stderr)
                     except ValueError:
                         print(f"[execute_effect] ❌ Неверный chat_id: {target_chat_id_str}", file=sys.stderr)

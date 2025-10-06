@@ -1,4 +1,4 @@
-# tablebot-pipe-advanced\pipeline\check_guard.py
+# \tablebot-pipe-advanced\pipeline\check_guard.py
 # Copyright (C) 2025 Leonid Yasin
 # This file is part of Tablebot-pipe-Advanced and is licensed under the GNU GPL v3.0.
 # See the LICENSE file for details.

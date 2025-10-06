@@ -1,3 +1,4 @@
+# \tablebot-pipe-advanced\08_core_loop.py
 # Copyright (C) 2025 Leonid Yasin
 # This file is part of Tablebot-pipe-Advanced and is licensed under the GNU GPL v3.0.
 # See the LICENSE file for details.
@@ -96,24 +97,35 @@ async def main():
 
 
 # --- Обработчик сообщений ---
-async def handle_message(msg: types.Message, state: FSMContext, table_path, DynFSM, bot): # <-- Добавлен bot
+async def handle_message(msg: types.Message, state: FSMContext, table_path, DynFSM, bot):
     """Обрабатывает сообщение через pipeline функций"""
     try:
         data = await state.get_data()
         current_state = data.get("current_state", "start")
-        payload = {"current_state": current_state, "text": msg.text}
+        user_role = data.get("user_role", "client")  # Добавляем поддержку ролей
+        payload = {
+            "current_state": current_state, 
+            "text": msg.text,
+            "user_role": user_role,
+            "chat_id": msg.chat.id
+        }
         
-        print(f"📥 Вход: state={current_state!r}, text={payload['text']!r}") # Показываем text из payload
+        print(f"📥 Вход: state={current_state!r}, text={payload['text']!r}, role={user_role!r}")
 
-        # Pipeline вызовов
-        row = find_row(table_path, current_state, payload['text']) # Используем text из payload
-        skip = check_guard(row, payload, current_state) if row else False
+        # Pipeline вызовов с передачей роли
+        row = find_row(table_path, current_state, payload['text'], user_role)
         
-        if row and not skip:
-            execute_effect(row, payload, bot) # <-- Передаем bot в execute_effect
+        if not row:
+            await bot.send_message(msg.chat.id, "❌ Команда не распознана")
+            return
+
+        skip = check_guard(row, payload, current_state)
+        
+        if not skip:
+            execute_effect(row, payload, bot)
         
         message_content = build_message_content(row, payload)
-        integration = prepare_integration(row) if row else None
+        integration = prepare_integration(row)
         next_state = determine_transition(row, skip)
 
         # Отправка результата
@@ -125,18 +137,25 @@ async def handle_message(msg: types.Message, state: FSMContext, table_path, DynF
         
         if next_state and hasattr(DynFSM, next_state):
             await state.set_state(getattr(DynFSM, next_state))
-            await state.update_data(current_state=next_state, **payload) # Сохраняем payload
+            # Обновляем данные без дублирования
+            new_payload = payload.copy()
+            new_payload['current_state'] = next_state
+            await state.update_data(**new_payload)
             print(f"🔄 Переход: {current_state!r} → {next_state!r}")
-        elif not row:
-            # Используем bot.send_message вместо msg.answer для совместимости с fake_message
-            await bot.send_message(msg.chat.id, "❌ Команда не распознана")
         else:
-            # Если строка была, но перехода нет, всё равно сохраняем payload
             await state.update_data(**payload)
 
     except Exception as e:
         print(f"💥 Ошибка: {e}")
-        await bot.send_message(msg.chat.id, "⚠️ Ошибка обработки") 
+        import traceback
+        traceback.print_exc()
+        await bot.send_message(msg.chat.id, "⚠️ Ошибка обработки")
+
+    except Exception as e: 
+        print(f"💥 Ошибка в handle_message: {e}")
+        import traceback
+        traceback.print_exc()
+        await bot.send_message(msg.chat.id, "⚠️ Ошибка обработки")
 
 
 # --- Обработчик callback'ов ---

@@ -1,75 +1,96 @@
+# \tablebot-pipe-advanced\pipeline\execute_effect.py
 # Copyright (C) 2025 Leonid Yasin
 # This file is part of Tablebot-pipe-Advanced and is licensed under the GNU GPL v3.0.
 # See the LICENSE file for details.
-# pipeline/execute_effect.py
 #!/usr/bin/env python3
 import sys
-import asyncio # Если нужно немного подождать перед отправкой
 
-def execute_effect(row, payload, bot): # <-- Добавляем bot как параметр
-    """Выполняет side-effect действия"""
-    action = row.get("result_action", "").strip()
-    if not action:
+def execute_effect(row, payload, bot):
+    """Выполняет side-effect действия из result_action"""
+    # БЕЗОПАСНОЕ ИЗВЛЕЧЕНИЕ - используем .get() с значением по умолчанию
+    result_action = (row.get("result_action") or "").strip()
+    
+    if not result_action or result_action == "—":
         print("[execute_effect] ⏹️ Нет действия", file=sys.stderr)
         return
-
-    print(f"[execute_effect] 🛠️ Выполнение: {action!r}", file=sys.stderr)
-
-    # --- НАЧАЛО: Новый эффект для отправки другому пользователю по chat_id ---
-    if action.startswith("notify_user_by_chat_id:"):
+    
+    print(f"[execute_effect] 🔧 Выполняю: {result_action}", file=sys.stderr)
+    
+    # Парсим действия (могут быть разделены |)
+    actions = [a.strip() for a in result_action.split('|') if a.strip()]
+    
+    for action in actions:
         try:
-            # Формат: notify_user_by_chat_id:target_chat_id:message_template
-            # message_template может содержать плейсхолдеры {field}, которые будут заменены из payload
-            parts = action.split(":", 2)
-            if len(parts) < 3:
-                print(f"[execute_effect] ⚠️ Неверный формат notify_user_by_chat_id: {action}", file=sys.stderr)
-                return
-            _, target_chat_id_str, message_template = parts
-
-            # Подстановка плейсхолдеров из payload в message_template
-            text_to_send = message_template
-            for key, value in payload.items():
-                placeholder = "{" + key + "}"
-                if placeholder in text_to_send:
-                    # Экранируем HTML, если используете parse_mode HTML
-                    # import html # Если нужно
-                    # safe_val = html.escape(str(value))
-                    # text_to_send = text_to_send.replace(placeholder, safe_val)
-                    # Пока без экранирования, если не нужно
-                    text_to_send = text_to_send.replace(placeholder, str(value))
-
-            target_chat_id = int(target_chat_id_str)
-            print(f"[execute_effect] 📬 Отправка в {target_chat_id!r}: {text_to_send!r}", file=sys.stderr)
-            # Используем bot для отправки
-            # Запускаем в отдельной задаче, чтобы не блокировать основной пайплайн
-            # asyncio.create_task(bot.send_message(target_chat_id, text_to_send))
-            # Или просто await (блокирует, но проще)
-            asyncio.run_coroutine_threadsafe(bot.send_message(target_chat_id, text_to_send), bot.session._connector._loop)
-            # await bot.send_message(target_chat_id, text_to_send) # Если не нужно асинхронно
-
-        except ValueError:
-            print(f"[execute_effect] ⚠️ Неверный формат chat_id в notify_user_by_chat_id: {action}", file=sys.stderr)
+            if action.startswith('save:'):
+                # Формат: save:field_name:value
+                parts = action[5:].split(':', 1)
+                if len(parts) == 2:
+                    field, value_template = parts
+                    # Подставляем значения из payload в value_template
+                    value = value_template
+                    for key, val in payload.items():
+                        placeholder = '{' + key + '}'
+                        value = value.replace(placeholder, str(val))
+                    
+                    payload[field] = value
+                    print(f"[execute_effect] 💾 Сохранено: {field} = {value}", file=sys.stderr)
+            
+            elif action.startswith('clear:'):
+                # Формат: clear:field_name
+                field = action[6:]
+                if field in payload:
+                    del payload[field]
+                    print(f"[execute_effect] 🗑️ Очищено: {field}", file=sys.stderr)
+            
+            elif action.startswith('notify_user_by_chat_id:'):
+                # Формат: notify_user_by_chat_id:target_chat_id:message_template
+                parts = action[22:].split(':', 1)
+                if len(parts) == 2:
+                    target_chat_id_str, message_template = parts
+                    try:
+                        target_chat_id = int(target_chat_id_str)
+                        # Подставляем значения в шаблон сообщения
+                        message = message_template
+                        for key, val in payload.items():
+                            placeholder = '{' + key + '}'
+                            message = message.replace(placeholder, str(val))
+                        
+                        # Отправляем сообщение (нужен доступ к bot)
+                        if bot:
+                            from core.message_sender import send_message_by_content
+                            await send_message_by_content(bot, target_chat_id, {"type": "text", "text": message})
+                            print(f"[execute_effect] 📨 Уведомление отправлено в чат {target_chat_id}", file=sys.stderr)
+                    except ValueError:
+                        print(f"[execute_effect] ❌ Неверный chat_id: {target_chat_id_str}", file=sys.stderr)
+            
+            # ДОБАВЛЕНО: Поддержка многоролевых действий из вашей таблицы
+            elif action.startswith('notify_operator'):
+                # Уведомление оператора
+                print(f"[execute_effect] 📢 Уведомление оператора", file=sys.stderr)
+                # Здесь можно добавить логику уведомления конкретного оператора
+                
+            elif action.startswith('notify_executor'):
+                # Уведомление исполнителя
+                print(f"[execute_effect] 📢 Уведомление исполнителя", file=sys.stderr)
+                
+            elif action.startswith('notify_client'):
+                # Уведомление клиента
+                print(f"[execute_effect] 📢 Уведомление клиента", file=sys.stderr)
+                
+            elif action.startswith('assign_executor'):
+                # Назначение исполнителя
+                print(f"[execute_effect] 👤 Назначение исполнителя", file=sys.stderr)
+                
+            elif action.startswith('order_done'):
+                # Заказ завершен
+                print(f"[execute_effect] ✅ Заказ завершен", file=sys.stderr)
+                
+            elif action.startswith('order_cancelled'):
+                # Заказ отменен
+                print(f"[execute_effect] ❌ Заказ отменен", file=sys.stderr)
+                
+            else:
+                print(f"[execute_effect] ⚠️ Неизвестное действие: {action}", file=sys.stderr)
+                
         except Exception as e:
-            print(f"[execute_effect] ❌ Ошибка при отправке уведомления: {e}", file=sys.stderr)
-        return
-    # --- КОНЕЦ: Новый эффект для отправки другому пользователю ---
-
-    # --- СТАРЫЕ эффекты ---
-    if action.startswith("save:"):
-        try:
-            _, field, value = action.split(":", 2)
-            # Подстановка значений из payload в value (если нужно)
-            for k, v in payload.items():
-                placeholder = "{" + k + "}"
-                if placeholder in value:
-                    value = value.replace(placeholder, str(v))
-            payload[field] = value
-            print(f"[execute_effect] 💾 Сохранено {field} = {value!r}", file=sys.stderr)
-        except ValueError:
-            print(f"[execute_effect] ⚠️ Неверный формат save: {action}", file=sys.stderr)
-    elif action.startswith("clear:"):
-        field = action.split(":", 1)[1]
-        payload.pop(field, None)
-        print(f"[execute_effect] 🧹 Очищено {field}", file=sys.stderr)
-    else:
-        print(f"[execute_effect] ❓ Неизвестное действие: {action}", file=sys.stderr)
+            print(f"[execute_effect] ❌ Ошибка выполнения {action}: {e}", file=sys.stderr)

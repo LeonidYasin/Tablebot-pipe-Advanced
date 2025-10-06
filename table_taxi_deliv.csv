@@ -1,5 +1,5 @@
-process_name,from_state,to_state,command,role,condition,message_text,reply_markup,inline_markup,notification,integrations,result_action
-TaxiDelivery,start,choose_service,/start,client,,"Здравствуйте! Выберите услугу:",🚕 Такси|🍕 Доставка,,,
+process_name,from_state,to_state,command,role,condition,message_text,reply_markup,inline_markup,notification,integrations,result_action, bot_command,bot_description
+TaxiDelivery,start,choose_service,/start,client,,"Здравствуйте! Выберите услугу:",🚕 Такси|🍕 Доставка,,,,,/start,Запустить бота
 TaxiDelivery,choose_service,enter_from,🚕 Такси,client,,"Введите адрес подачи такси:",,,,
 TaxiDelivery,choose_service,enter_from,🍕 Доставка,client,,"Введите адрес доставки:",,,,
 TaxiDelivery,enter_from,enter_to,<text>,client,,"Введите адрес назначения (куда ехать/доставить):",,,,"save:from_address:{text}"

@@ -1,3 +1,4 @@
+# \tablebot-pipe-advanced\core\message_sender\text_sender.py
 # Copyright (C) 2025 Leonid Yasin
 # This file is part of Tablebot-pipe-Advanced and is licensed under the GNU GPL v3.0.
 # See the LICENSE file for details.
@@ -18,6 +19,11 @@ async def send_text_message(bot, chat_id, content):
     
     # Используем inline-кнопки если есть, иначе обычные
     markup = inline_markup if inline_markup else reply_markup
+    
+    # ДОБАВЛЕНО: Очистка клавиатуры если reply_buttons пустое или "—"
+    if content.get("reply_buttons", "").strip() in ["", "—"] and not inline_markup:
+        from aiogram.types import ReplyKeyboardRemove
+        markup = ReplyKeyboardRemove()
     
     parse_mode = detect_parse_mode(content.get("text", ""))
     

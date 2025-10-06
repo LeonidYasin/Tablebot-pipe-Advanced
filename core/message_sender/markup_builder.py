@@ -1,3 +1,4 @@
+# \tablebot-pipe-advanced\core\message_sender\markup_builder.py
 # Copyright (C) 2025 Leonid Yasin
 # This file is part of Tablebot-pipe-Advanced and is licensed under the GNU GPL v3.0.
 # See the LICENSE file for details.
@@ -7,8 +8,9 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 
 def build_reply_markup(buttons_str):
     """Создает обычную клавиатуру"""
-    if not buttons_str or buttons_str == "—":
-        return None
+    if not buttons_str or buttons_str == "—" or buttons_str.strip() == "":
+        from aiogram.types import ReplyKeyboardRemove
+        return ReplyKeyboardRemove()
     
     buttons = [btn.strip() for btn in buttons_str.split('|') if btn.strip()]
     

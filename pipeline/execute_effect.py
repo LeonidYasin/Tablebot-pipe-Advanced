@@ -63,6 +63,21 @@ async def execute_effect(row, payload, bot):  # ДОБАВЛЕНО: async
                     except ValueError:
                         print(f"[execute_effect] ❌ Неверный chat_id: {target_chat_id_str}", file=sys.stderr)
             
+            # В execute_effect.py добавьте обработку location
+            elif action.startswith('geocode_location'):
+                if 'location' in payload:
+                    lat = payload['location']['latitude']
+                    lon = payload['location']['longitude']
+                    # Вызов API для обратного геокодирования
+                    address = await reverse_geocode(lat, lon)
+                    payload['address'] = address
+                    print(f"[execute_effect] 🗺️ Геокодирование: {lat},{lon} -> {address}", file=sys.stderr)
+            
+            # В функцию execute_effect добавьте:
+            elif action == 'request_location':
+                print(f"[execute_effect] 📍 Запрос геолокации", file=sys.stderr)
+                # Это действие только для логирования, реальный запрос делается в message_sender
+            
             # ДОБАВЛЕНО: Поддержка многоролевых действий из вашей таблицы
             elif action.startswith('notify_operator'):
                 # Уведомление оператора

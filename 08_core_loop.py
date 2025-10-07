@@ -116,15 +116,31 @@ async def handle_message(msg: types.Message, state: FSMContext, table_path, DynF
     try:
         data = await state.get_data()
         current_state = data.get("current_state", "start")
-        user_role = data.get("user_role", "client")  # Добавляем поддержку ролей
+        user_role = data.get("user_role", "client")
+        
+        # Обработка геолокации
+        user_input = msg.text
+        location_data = None
+        
+        if msg.location:
+            user_input = "<location>"
+            location_data = {
+                "latitude": msg.location.latitude,
+                "longitude": msg.location.longitude
+            }
+        
         payload = {
             "current_state": current_state, 
-            "text": msg.text,
+            "text": user_input,
             "user_role": user_role,
             "chat_id": msg.chat.id
         }
         
-        print(f"📥 Вход: state={current_state!r}, text={payload['text']!r}, role={user_role!r}")
+        # Добавляем location в payload если есть
+        if location_data:
+            payload["location"] = location_data
+        
+        print(f"📥 Вход: state={current_state!r}, text={payload['text']!r}, role={user_role!r}, location={location_data is not None}")
 
         # Pipeline вызовов с передачей роли
         row = find_row(table_path, current_state, payload['text'], user_role)

@@ -1,3 +1,4 @@
+# \tablebot-pipe-advanced\pipeline\build_message.py
 # Copyright (C) 2025 Leonid Yasin
 # This file is part of Tablebot-pipe-Advanced and is licensed under the GNU GPL v3.0.
 # See the LICENSE file for details.
@@ -140,18 +141,16 @@ def build_message_content(row, payload):
     if row.get("inline_markup") and row["inline_markup"] != "—":
         content["inline_buttons"] = row["inline_markup"]
 
+    # ДОБАВЛЕНО: Передача integrations для запроса геолокации
+    if row.get("integrations") and row["integrations"] != "—":
+        content["integrations"] = row["integrations"]
+        print(f"[build_message] 🔌 Интеграции: {row['integrations']}", file=sys.stderr)
+
     # Опросы (только если тип ещё не определён)
     if row.get("entities") and row["entities"] != "—" and content.get("type") == "text":
         content["options"] = [opt.strip() for opt in row["entities"].split(',')]
         content["type"] = "poll"
 
-    print(f"[build_message] 🎨 Создан контент: {content['type']}, text: {bool(content.get('text'))}, media: {content.get('media_file')}", file=sys.stderr)
-    # Старые строки для отладки message_text до форматирования плейсхолдеров могут быть неактуальны
-    # print(f"[build] message_text до fmt: {row.get('message_text','')!r}, payload: {payload}", file=sys.stderr)
-    # if "{" in (row.get("message_text") or ""):
-    #     row["message_text"] = format_notification(row, payload)
-    #     print(f"[build] message_text после fmt: {row.get('message_text','')!r}", file=sys.stderr)
-    # else:
-    #     print(f"[build] фигурных скобок нет, пропускаем fmt", file=sys.stderr)
+    print(f"[build_message] 🎨 Создан контент: {content['type']}, text: {bool(content.get('text'))}, media: {content.get('media_file')}, integrations: {content.get('integrations', 'нет')}", file=sys.stderr)
 
     return content

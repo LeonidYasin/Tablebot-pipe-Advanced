@@ -17,13 +17,41 @@ async def send_text_message(bot, chat_id, content):
     reply_markup = build_reply_markup(content.get("reply_buttons", ""))
     inline_markup = build_inline_markup(content.get("inline_buttons", ""))
     
-    # Используем inline-кнопки если есть, иначе обычные
-    markup = inline_markup if inline_markup else reply_markup
+     # Специальная обработка для запроса локации
+    if content.get("integrations") == "request_location":
+        print(f"[text_sender] 📍 Обнаружен запрос геолокации!", file=sys.stderr)
+        from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+        
+        # Создаем клавиатуру с кнопкой геолокации
+        buttons = []
+        
+        # Добавляем альтернативные кнопки если есть
+        if content.get("reply_buttons"):
+            alt_buttons = [btn.strip() for btn in content.get("reply_buttons", "").split('|') if btn.strip()]
+            for btn_text in alt_buttons:
+                buttons.append([KeyboardButton(text=btn_text)])
+        
+        # Добавляем кнопку геолокации (работает в мобильных приложениях)
+        buttons.append([KeyboardButton(text="📍 Отправить геолокацию", request_location=True)])
+        
+        markup = ReplyKeyboardMarkup(
+            keyboard=buttons,
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        print(f"[text_sender] 📍 Создана клавиатура с запросом геолокации", file=sys.stderr)
+    else:
     
-    # ДОБАВЛЕНО: Очистка клавиатуры если reply_buttons пустое или "—"
-    if content.get("reply_buttons", "").strip() in ["", "—"] and not inline_markup:
-        from aiogram.types import ReplyKeyboardRemove
-        markup = ReplyKeyboardRemove()
+        # Используем inline-кнопки если есть, иначе обычные
+        markup = inline_markup if inline_markup else reply_markup
+        
+        # ДОБАВЛЕНО: Очистка клавиатуры если reply_buttons пустое или "—"
+        if content.get("reply_buttons", "").strip() in ["", "—"] and not inline_markup:
+            from aiogram.types import ReplyKeyboardRemove
+            markup = ReplyKeyboardRemove()
+            print(f"[text_sender] 🗑️ Клавиатура очищена", file=sys.stderr)
+        else:
+            print(f"[text_sender] 📋 Используется обычная клавиатура: {content.get('reply_buttons')}", file=sys.stderr)
     
     parse_mode = detect_parse_mode(content.get("text", ""))
     

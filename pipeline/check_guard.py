@@ -83,7 +83,10 @@ def check_guard(row, payload, current_state):
         else:
             print(f"[check_guard] ⚠️ Неизвестный тип условия: {condition}", file=sys.stderr)
             return False
+            
         
+    
+    
     except Exception as e:
         print(f"[check_guard] ❌ Ошибка проверки условия: {e}", file=sys.stderr)
         return True

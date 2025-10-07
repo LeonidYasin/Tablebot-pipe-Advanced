@@ -112,75 +112,144 @@ async def main():
 
 # --- Обработчик сообщений ---
 async def handle_message(msg: types.Message, state: FSMContext, table_path, DynFSM, bot):
-    """Обрабатывает сообщение через pipeline функций"""
+    """Обрабатывает сообщение через pipeline функций с полным логированием"""
     try:
+        print(f"🎯 [handler] НАЧАЛО ОБРАБОТКИ СООБЩЕНИЯ", file=sys.stderr)
+        
+        # === ШАГ 1: Получение данных из FSM ===
+        print(f"📥 [handler] Получение данных из FSM...", file=sys.stderr)
         data = await state.get_data()
         current_state = data.get("current_state", "start")
         user_role = data.get("user_role", "client")
         
-        # Обработка геолокации
-        user_input = msg.text
+        print(f"📊 [handler] Текущее состояние: {current_state!r}", file=sys.stderr)
+        print(f"👤 [handler] Роль пользователя: {user_role!r}", file=sys.stderr)
+        print(f"🗂️ [handler] Все ключи в FSM: {list(data.keys())}", file=sys.stderr)
+        
+        # Детальное логирование важных полей
+        for key in ['address', 'from_address', 'to_address', 'phone', 'location']:
+            if key in data:
+                print(f"📋 [handler] {key} в FSM: {data[key]!r}", file=sys.stderr)
+        
+        # === ШАГ 2: Обработка входящего сообщения ===
+        print(f"📨 [handler] Обработка входящего сообщения...", file=sys.stderr)
+        
+        # ИНИЦИАЛИЗАЦИЯ user_input ДО использования (исправление ошибки)
+        user_input = msg.text or ""
         location_data = None
         
+        # Обработка геолокации
         if msg.location:
+            print(f"📍 [handler] Обнаружена геолокация!", file=sys.stderr)
             user_input = "<location>"
             location_data = {
                 "latitude": msg.location.latitude,
                 "longitude": msg.location.longitude
             }
+            print(f"📍 [handler] Координаты: {location_data}", file=sys.stderr)
         
-        payload = {
-            "current_state": current_state, 
-            "text": user_input,
-            "user_role": user_role,
+        print(f"📝 [handler] Обработанный ввод: {user_input!r}", file=sys.stderr)
+        
+        # === ШАГ 3: Формирование payload ===
+        print(f"🔄 [handler] Формирование payload...", file=sys.stderr)
+        
+        # ВАЖНО: Копируем ВСЕ данные из FSM в payload чтобы не потерять их
+        payload = data.copy()
+        payload.update({
+            "current_state": current_state,
+            "text": user_input,  # Используем инициализированную переменную
+            "user_role": user_role, 
             "chat_id": msg.chat.id
-        }
+        })
         
         # Добавляем location в payload если есть
         if location_data:
             payload["location"] = location_data
+            print(f"📍 [handler] Location добавлен в payload", file=sys.stderr)
         
-        print(f"📥 Вход: state={current_state!r}, text={payload['text']!r}, role={user_role!r}, location={location_data is not None}")
-
-        # Pipeline вызовов с передачей роли
+        print(f"📦 [handler] Payload сформирован. Ключи: {list(payload.keys())}", file=sys.stderr)
+        print(f"🔍 [handler] Детали payload:", file=sys.stderr)
+        for key, value in payload.items():
+            if key not in ['location']:  # Не логируем большие объекты
+                print(f"   {key}: {value!r}", file=sys.stderr)
+        
+        # === ШАГ 4: Запуск пайплайна обработки ===
+        print(f"⚙️ [handler] Запуск пайплайна обработки...", file=sys.stderr)
+        
+        # 4.1 Поиск подходящей строки в таблице
+        print(f"🔍 [handler] Поиск строки в таблице...", file=sys.stderr)
         row = find_row(table_path, current_state, payload['text'], user_role)
         
         if not row:
+            print(f"❌ [handler] Строка не найдена в таблице", file=sys.stderr)
             await bot.send_message(msg.chat.id, "❌ Команда не распознана")
             return
-
+        
+        print(f"✅ [handler] Найдена строка: from_state={row.get('from_state')!r} -> to_state={row.get('to_state')!r}", file=sys.stderr)
+        
+        # 4.2 Проверка условий (guards)
+        print(f"🛡️ [handler] Проверка условий...", file=sys.stderr)
         skip = check_guard(row, payload, current_state)
+        print(f"🛡️ [handler] Результат проверки условий: skip={skip}", file=sys.stderr)
         
+        # 4.3 Выполнение эффектов (если условия пройдены)
         if not skip:
-            await execute_effect(row, payload, bot)  # ДОБАВЛЕНО: await
+            print(f"⚡ [handler] Выполнение эффектов...", file=sys.stderr)
+            await execute_effect(row, payload, bot)
+            print(f"✅ [handler] Эффекты выполнены", file=sys.stderr)
+        else:
+            print(f"⏭️ [handler] Эффекты пропущены (skip=True)", file=sys.stderr)
         
+        # 4.4 Построение сообщения
+        print(f"💬 [handler] Построение контента сообщения...", file=sys.stderr)
         message_content = build_message_content(row, payload)
+        if message_content:
+            print(f"✅ [handler] Контент сообщения построен: type={message_content.get('type')}", file=sys.stderr)
+        else:
+            print(f"ℹ️ [handler] Контент сообщения пустой", file=sys.stderr)
+        
+        # 4.5 Подготовка интеграций
+        print(f"🔌 [handler] Подготовка интеграций...", file=sys.stderr)
         integration = prepare_integration(row)
+        if integration:
+            print(f"🔌 [handler] Интеграция подготовлена: {integration}", file=sys.stderr)
+        
+        # 4.6 Определение следующего состояния
+        print(f"🔄 [handler] Определение перехода...", file=sys.stderr)
         next_state = determine_transition(row, skip)
-
-        # Отправка результата
+        print(f"🔄 [handler] Следующее состояние: {next_state!r}", file=sys.stderr)
+        
+        # === ШАГ 5: Отправка результата пользователю ===
+        print(f"📤 [handler] Отправка результата пользователю...", file=sys.stderr)
         if message_content:
             await send_message_by_content(bot, msg.chat.id, message_content)
+            print(f"✅ [handler] Сообщение отправлено", file=sys.stderr)
         
         if integration:
-            print(f"🔌 Интеграция: {integration}")
+            print(f"🔌 [handler] Интеграция: {integration}", file=sys.stderr)
+        
+        # === ШАГ 6: Обновление состояния FSM ===
+        print(f"💾 [handler] Обновление состояния FSM...", file=sys.stderr)
         
         if next_state and hasattr(DynFSM, next_state):
             await state.set_state(getattr(DynFSM, next_state))
-            # Обновляем данные без дублирования
-            new_payload = payload.copy()
-            new_payload['current_state'] = next_state
-            await state.update_data(**new_payload)
-            print(f"🔄 Переход: {current_state!r} → {next_state!r}")
-        else:
-            await state.update_data(**payload)
+            print(f"✅ [handler] Состояние FSM установлено: {next_state!r}", file=sys.stderr)
+        
+        # ВАЖНО: ВСЕГДА сохраняем все данные payload в FSM
+        new_payload = payload.copy()
+        new_payload['current_state'] = next_state if next_state else current_state
+        await state.update_data(**new_payload)
+        
+        print(f"🔄 [handler] ПЕРЕХОД ВЫПОЛНЕН: {current_state!r} → {next_state!r}", file=sys.stderr)
+        print(f"💾 [handler] Сохраненные ключи в FSM: {list(new_payload.keys())}", file=sys.stderr)
+        print(f"🎯 [handler] ОБРАБОТКА ЗАВЕРШЕНА УСПЕШНО", file=sys.stderr)
 
     except Exception as e:
-        print(f"💥 Ошибка: {e}")
+        print(f"💥 [handler] КРИТИЧЕСКАЯ ОШИБКА: {e}", file=sys.stderr)
         import traceback
-        traceback.print_exc()
+        print(f"💥 [handler] Трассировка ошибки:", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         await bot.send_message(msg.chat.id, "⚠️ Ошибка обработки")
-
 
 # --- Обработчик callback'ов ---
 async def handle_callback(callback: types.CallbackQuery, state: FSMContext, table_path, DynFSM, bot):
@@ -189,7 +258,7 @@ async def handle_callback(callback: types.CallbackQuery, state: FSMContext, tabl
     fake_message = types.Message(
         message_id=callback.message.message_id,
         from_user=callback.from_user,
-        chat=callback.message.chat,  # ← ИСПРАВЛЕНО: callback.message.chat
+        chat=callback.message.chat,
         date=callback.message.date,
         text=callback.data  # Используем callback_data как текст команды
     )

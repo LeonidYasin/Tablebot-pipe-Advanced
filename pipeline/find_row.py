@@ -18,7 +18,9 @@ def find_row(table_path, current_state, user_input, user_role=None):
 
     print(f"[find_row] 🔍 Поиск: state={current_state!r}, text={user_input!r}, role={user_role!r}", file=sys.stderr)
 
-    for row in rows:
+    matching_rows = []
+    
+    for i, row in enumerate(rows):
         # Безопасное извлечение всех полей по именам
         from_state = (row.get("from_state") or "").strip()
         command = (row.get("command") or "").strip()
@@ -39,8 +41,25 @@ def find_row(table_path, current_state, user_input, user_role=None):
 
         # Проверяем совпадение команды
         if command == user_input or command == "<text>" or command == "<location>":
-            print(f"[find_row] ✅ Найдено: state={from_state!r}, command={command!r}, role={role!r} -> {row.get('to_state', 'N/A')!r}", file=sys.stderr)
-            return row
+            matching_rows.append((i + 2, row))  # +2 потому что: 0-based index + 1 строка заголовков + 1 для человекочитаемого номера
+            print(f"[find_row] ✅ Найдено совпадение: строка {i+2}, state={from_state!r}, command={command!r}, role={role!r} -> {row.get('to_state', 'N/A')!r}", file=sys.stderr)
 
-    print(f"[find_row] ❌ Не найдено подходящей строки", file=sys.stderr)
-    return None
+    # Обработка дублирования строк
+    if len(matching_rows) > 1:
+        print(f"[find_row] ⚠️  Обнаружено дублирование! Найдено {len(matching_rows)} подходящих строк:", file=sys.stderr)
+        for line_num, row in matching_rows:
+            print(f"[find_row] ⚠️   - Строка {line_num}: from_state={row.get('from_state')!r}, command={row.get('command')!r}, to_state={row.get('to_state')!r}", file=sys.stderr)
+        
+        # Выбираем первую строку (приоритет по порядку в таблице)
+        selected_line, selected_row = matching_rows[0]
+        print(f"[find_row] ⚠️  Выбрана строка {selected_line} (первая в таблице)", file=sys.stderr)
+        print(f"[find_row] ✅ Финальный выбор: state={selected_row.get('from_state')!r}, command={selected_row.get('command')!r} -> {selected_row.get('to_state', 'N/A')!r}", file=sys.stderr)
+        return selected_row
+    
+    elif len(matching_rows) == 1:
+        line_num, row = matching_rows[0]
+        print(f"[find_row] ✅ Найдена одна подходящая строка {line_num}: state={row.get('from_state')!r}, command={row.get('command')!r} -> {row.get('to_state', 'N/A')!r}", file=sys.stderr)
+        return row
+    else:
+        print(f"[find_row] ❌ Не найдено подходящих строк", file=sys.stderr)
+        return None

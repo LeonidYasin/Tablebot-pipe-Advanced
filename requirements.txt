@@ -1,0 +1,6 @@
+aiogram==3.1.1
+aiohttp>=3.8
+python-dotenv
+openpyxl
+pandas
+geopy

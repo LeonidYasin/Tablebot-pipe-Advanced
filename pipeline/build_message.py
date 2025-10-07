@@ -7,6 +7,12 @@ import sys
 from .format_notification import format_notification
 
 def build_message_content(row, payload):
+    
+    # В функции build_message_content в начале:
+    print(f"[build_message] 🔍 DEBUG: Все поля в payload для состояния {payload.get('current_state')}:", file=sys.stderr)
+    for key, value in payload.items():
+        print(f"[build_message] 🔍   {key}: {value!r}", file=sys.stderr)
+        
     """Строит полное описание сообщения для отправки"""
     if not row:
         return None
@@ -102,13 +108,27 @@ def build_message_content(row, payload):
         # форматируем {placeholders} самостоятельно
         # Обратите внимание: форматирование теперь применяется к объединённому тексту
         if "{" in full_message_text:
-            for key, value in payload.items():
-                placeholder = "{" + key + "}"
-                if placeholder in full_message_text:
-                    # Экранируем HTML-символы, если используете HTML parse_mode
-                    safe_val = str(value).replace("&", "&amp;").replace("<", "<").replace(">", ">")
-                    full_message_text = full_message_text.replace(placeholder, safe_val)
+            # В цикле замены плейсхолдеров добавьте специальную обработку для location:
+            if "{" in full_message_text:
+                for key, value in payload.items():
+                    # Обрабатываем обычные плейсхолдеры {key}
+                    placeholder = "{" + key + "}"
+                    if placeholder in full_message_text:
+                        safe_val = str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        full_message_text = full_message_text.replace(placeholder, safe_val)
+                    
+                    # Обрабатываем вложенные плейсхолдеры {key[subkey]} для location
+                    if key == "location" and isinstance(value, dict):
+                        for subkey, subvalue in value.items():
+                            nested_placeholder = "{" + key + "[" + subkey + "]}"
+                            if nested_placeholder in full_message_text:
+                                safe_subval = str(subvalue).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                                full_message_text = full_message_text.replace(nested_placeholder, safe_subval)
             print(f"[build] отформатировано: {full_message_text!r}", file=sys.stderr)
+            print(f"[build_message] 🔍 До форматирования: {full_message_text!r}", file=sys.stderr)
+            print(f"[build_message] 🔍 Payload keys: {list(payload.keys())}", file=sys.stderr)
+            if 'location' in payload:
+                print(f"[build_message] 🔍 Location в payload: {payload['location']}", file=sys.stderr)
 
         content["text"] = full_message_text # <-- Теперь content["text"] содержит и прогресс, и основной текст
 

@@ -23,6 +23,15 @@ def load_csv_table(file_path):
     try:
         with open(file_path, encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
+        
+        # Проверка на возможные дублирования
+        state_transitions = {}
+        for i, row in enumerate(rows):
+            key = (row.get("from_state", ""), row.get("command", ""), row.get("role", ""))
+            if key in state_transitions:
+                print(f"[table_loader] ⚠️  Возможное дублирование: строки {state_transitions[key] + 2} и {i + 2} имеют одинаковые from_state, command, role", file=sys.stderr)
+            state_transitions[key] = i
+        
         print(f"[table_loader] 📄 Загружен CSV: {len(rows)} строк", file=sys.stderr)
         return rows
     except Exception as e:

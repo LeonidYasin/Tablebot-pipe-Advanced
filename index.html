@@ -65,36 +65,95 @@
             color: white;
         }
 
-        /* Hero Section */
+        /* Hero Section - ИСПРАВЛЕННАЯ с хорошей видимостью */
         .hero {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
             color: white;
             padding: 120px 0 80px;
             text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 80%, rgba(37, 99, 235, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(124, 58, 237, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(6, 182, 212, 0.1) 0%, transparent 50%);
+            z-index: 1;
+        }
+
+        .hero .container {
+            position: relative;
+            z-index: 2;
         }
 
         .hero h1 {
             font-size: 3.5rem;
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
             font-weight: 700;
+            text-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            color: #ffffff;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        .hero-accent {
+            display: inline-block;
+            background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #06b6d4 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: none;
         }
 
         .hero-subtitle {
-            font-size: 1.4rem;
+            font-size: 1.8rem;
             margin-bottom: 2rem;
-            opacity: 0.9;
-            max-width: 800px;
-            margin-left: auto;
-            margin-right: auto;
+            font-weight: 600;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            color: #f1f5f9;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            line-height: 1.3;
         }
 
         .hero-tagline {
-            font-size: 1.2rem;
+            font-size: 1.4rem;
             margin-bottom: 3rem;
-            font-style: italic;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+            text-shadow: 0 2px 6px rgba(0,0,0,0.4);
+            line-height: 1.5;
+            color: #e2e8f0;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            font-weight: 500;
+            padding: 0 1rem;
         }
 
-        /* Sections */
+        .hero-tagline .highlight {
+            color: #93c5fd;
+            font-weight: 600;
+            text-shadow: 0 2px 4px rgba(147, 197, 253, 0.3);
+        }
+
+        .hero-arrow {
+            display: inline-block;
+            margin: 0 0.5rem;
+            color: #60a5fa;
+            font-weight: bold;
+            text-shadow: 0 2px 4px rgba(96, 165, 250, 0.3);
+        }
+
+        /* Остальные стили остаются без изменений */
         section {
             padding: 80px 0;
         }
@@ -232,17 +291,18 @@
         .btn-primary:hover {
             background: var(--primary-dark);
             transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(37, 99, 235, 0.3);
         }
 
         .btn-secondary {
             background: transparent;
-            color: var(--primary);
-            border-color: var(--primary);
+            color: white;
+            border-color: white;
         }
 
         .btn-secondary:hover {
-            background: var(--primary);
-            color: white;
+            background: white;
+            color: var(--primary);
             transform: translateY(-2px);
         }
 
@@ -312,13 +372,17 @@
                 font-size: 2.5rem;
             }
             
+            .hero-subtitle {
+                font-size: 1.4rem;
+            }
+            
+            .hero-tagline {
+                font-size: 1.1rem;
+            }
+            
             .problem-solution {
                 grid-template-columns: 1fr;
                 gap: 2rem;
-            }
-            
-            .hero-subtitle {
-                font-size: 1.2rem;
             }
             
             section {
@@ -345,17 +409,23 @@
         <button class="lang-btn" onclick="switchLanguage('en')">EN</button>
     </div>
 
-    <!-- Hero Section -->
+    <!-- Hero Section - ИСПРАВЛЕННАЯ с хорошей видимостью -->
     <section class="hero">
         <div class="container">
-            <h1>🚀 BotTable AI</h1>
+            <h1>🚀 <span class="hero-accent">BotTable AI</span></h1>
             <div class="lang-ru">
                 <div class="hero-subtitle">Табличная Революция в Программировании</div>
-                <p class="hero-tagline">Таблицы становятся исполняемым кодом. Естественный язык → Таблица → Рабочее приложение</p>
+                <p class="hero-tagline">
+                    <span class="highlight">Таблицы становятся исполняемым кодом.</span><br>
+                    Естественный язык <span class="hero-arrow">→</span> Таблица <span class="hero-arrow">→</span> Рабочее приложение
+                </p>
             </div>
             <div class="lang-en">
                 <div class="hero-subtitle">The Tabular Programming Revolution</div>
-                <p class="hero-tagline">Tables become executable code. Natural Language → Table → Working Application</p>
+                <p class="hero-tagline">
+                    <span class="highlight">Tables become executable code.</span><br>
+                    Natural Language <span class="hero-arrow">→</span> Table <span class="hero-arrow">→</span> Working Application
+                </p>
             </div>
             
             <div class="cta-buttons">
@@ -371,6 +441,7 @@
         </div>
     </section>
 
+    <!-- Остальная часть кода остается без изменений -->
     <!-- Problem & Solution -->
     <section>
         <div class="container">
